@@ -1,0 +1,140 @@
+{
+  "users": [
+    {
+      "_id": "6a62dc9e91b68d29edc560ed",
+      "id": "user-7323e05a-b540-48df-b743-d496be3f4c49",
+      "name": "joshuva",
+      "email": "joshuva033@gmail.com",
+      "passwordHash": "$2a$10$1Ve7i6QdOOyi99YnbrPj0elsVsSqtqg7N9Q2MCggmNUFS4qvO8Viq",
+      "avatar": "J",
+      "avatarUrl": null,
+      "status": "Hey there! I am using Chat-Verse.",
+      "readReceipts": true,
+      "resetCode": null,
+      "lastSeen": "2026-07-26T16:03:59.044Z",
+      "createdAt": "2026-07-24T03:31:42.256Z",
+      "updatedAt": "2026-07-26T16:03:59.044Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a62dff0e73534a40e99179d",
+      "id": "user-91cbdf76-b0b0-4eb3-93de-6e74452ad120",
+      "name": "Martin",
+      "email": "martin@gmail.com",
+      "passwordHash": "$2a$10$6JsTPIAWvWk358dyIAZteeSsSDU9sZVJDyO.f8BSsSqCri9diTgjO",
+      "avatar": "M",
+      "avatarUrl": null,
+      "status": "Hey there! I am using Chat-Verse.",
+      "readReceipts": true,
+      "resetCode": null,
+      "lastSeen": "2026-07-24T16:37:24.820Z",
+      "createdAt": "2026-07-24T03:45:52.247Z",
+      "updatedAt": "2026-07-24T16:37:24.885Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a639007a1ed45400cc7766d",
+      "id": "user-0bf2a66e-ea3d-483f-b3be-7b771966e155",
+      "name": "Alvarez",
+      "email": "alvarez@gmail.com",
+      "passwordHash": "$2a$10$D3bqbH3mVQsbRkQ9VHRoke5zV/uoF8MWyIhGpt7XY1rDZ73RPD7Wi",
+      "avatar": "A",
+      "avatarUrl": null,
+      "status": "Hey there! I am using Chat-Verse.",
+      "readReceipts": true,
+      "resetCode": null,
+      "lastSeen": "2026-07-26T16:09:30.644Z",
+      "createdAt": "2026-07-24T16:17:11.753Z",
+      "updatedAt": "2026-07-26T16:09:30.646Z",
+      "__v": 0
+    }
+  ],
+  "conversations": [
+    {
+      "_id": "6a62e00ce317477fdcf32a22",
+      "id": "conv-7676bed0-ea90-479e-afdf-0a6bd01c6551",
+      "participants": [
+        "user-7323e05a-b540-48df-b743-d496be3f4c49",
+        "user-91cbdf76-b0b0-4eb3-93de-6e74452ad120"
+      ],
+      "lastMessage": "msg-0a605687-a8f1-4298-b748-a60c1dc4f5af",
+      "isGroup": false,
+      "name": "",
+      "createdBy": "",
+      "updatedAt": "2026-07-24T16:15:21.856Z",
+      "createdAt": "2026-07-24T03:46:20.268Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a63901464fc289ad16ab3ed",
+      "id": "conv-6f1d4fa3-5b19-4c37-9303-efce45e40145",
+      "participants": [
+        "user-0bf2a66e-ea3d-483f-b3be-7b771966e155",
+        "user-7323e05a-b540-48df-b743-d496be3f4c49"
+      ],
+      "lastMessage": "msg-aef2212b-4461-41d4-b38d-23cbcf2376c2",
+      "isGroup": false,
+      "name": "",
+      "createdBy": "",
+      "updatedAt": "2026-07-24T16:17:40.814Z",
+      "createdAt": "2026-07-24T16:17:24.327Z",
+      "__v": 0
+    }
+  ],
+  "messages": [
+    {
+      "_id": "6a6384fabd58de220d71d49d",
+      "id": "msg-97b39ca4-b461-4ddd-b6a8-d3686af31436",
+      "conversationId": "conv-7676bed0-ea90-479e-afdf-0a6bd01c6551",
+      "senderId": "user-7323e05a-b540-48df-b743-d496be3f4c49",
+      "text": "helllo",
+      "fileUrl": null,
+      "fileName": null,
+      "fileType": null,
+      "fileSize": null,
+      "replyToMessageId": null,
+      "readAt": "2026-07-24T16:14:51.645Z",
+      "isPinned": false,
+      "deletedBy": [],
+      "createdAt": "2026-07-24T15:30:02.137Z",
+      "updatedAt": "2026-07-24T16:14:51.645Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a638f99fd85e3fe5dabf888",
+      "id": "msg-0a605687-a8f1-4298-b748-a60c1dc4f5af",
+      "conversationId": "conv-7676bed0-ea90-479e-afdf-0a6bd01c6551",
+      "senderId": "user-91cbdf76-b0b0-4eb3-93de-6e74452ad120",
+      "text": "Heyy",
+      "fileUrl": null,
+      "fileName": null,
+      "fileType": null,
+      "fileSize": null,
+      "replyToMessageId": null,
+      "readAt": "2026-07-24T16:15:21.863Z",
+      "isPinned": false,
+      "deletedBy": [],
+      "createdAt": "2026-07-24T16:15:21.855Z",
+      "updatedAt": "2026-07-24T16:15:21.863Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a639024300dcd8fe817dcf9",
+      "id": "msg-aef2212b-4461-41d4-b38d-23cbcf2376c2",
+      "conversationId": "conv-6f1d4fa3-5b19-4c37-9303-efce45e40145",
+      "senderId": "user-0bf2a66e-ea3d-483f-b3be-7b771966e155",
+      "text": "Hello joshuva",
+      "fileUrl": null,
+      "fileName": null,
+      "fileType": null,
+      "fileSize": null,
+      "replyToMessageId": null,
+      "readAt": "2026-07-24T16:17:47.852Z",
+      "isPinned": false,
+      "deletedBy": [],
+      "createdAt": "2026-07-24T16:17:40.813Z",
+      "updatedAt": "2026-07-24T16:17:47.852Z",
+      "__v": 0
+    }
+  ]
+}
