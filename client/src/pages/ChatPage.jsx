@@ -4,8 +4,7 @@ import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../services/api.js';
 
-const hostname = window.location.hostname;
-const defaultSocketUrl = `${window.location.protocol}//${hostname}:5001`;
+const defaultSocketUrl = 'https://chatverse-w6fc.onrender.com';
 const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.SOCKET_URL || import.meta.env.VITE_API_URL || import.meta.env.API_URL || defaultSocketUrl;
 
 function formatTime(value) {
