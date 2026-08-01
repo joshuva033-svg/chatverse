@@ -564,16 +564,10 @@ export default function ChatPage() {
     }
   };
 
-  const handleToggleMember = async (contactId) => {
+  const handleAddMember = async (contactId) => {
     if (!activeConversation) return;
 
-    let updatedIds;
-    if (groupMemberIds.includes(contactId)) {
-      updatedIds = groupMemberIds.filter((id) => id !== contactId);
-    } else {
-      updatedIds = [...groupMemberIds, contactId];
-    }
-
+    const updatedIds = [...groupMemberIds, contactId];
     if (user?.id && !updatedIds.includes(user.id)) {
       updatedIds.push(user.id);
     }
@@ -588,7 +582,29 @@ export default function ChatPage() {
       );
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to update group members.');
+      setErrorMessage(error.response?.data?.message || 'Failed to add member.');
+    }
+  };
+
+  const handleRemoveMember = async (contactId) => {
+    if (!activeConversation) return;
+
+    const updatedIds = groupMemberIds.filter((id) => id !== contactId);
+    if (user?.id && !updatedIds.includes(user.id)) {
+      updatedIds.push(user.id);
+    }
+
+    try {
+      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
+        participantIds: updatedIds,
+      });
+      setGroupMemberIds(data.participants.map((p) => p.id));
+      setConversations((previous) =>
+        previous.map((conv) => (conv.id === data.id ? data : conv))
+      );
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to remove member.');
     }
   };
 
@@ -1124,104 +1140,27 @@ export default function ChatPage() {
                         </svg>
                       </div>
                     )}
-                    <div className="min-w-0 relative">
-                      <p
-                        onClick={() => {
-                          if (activeConversation.isGroup && activeConversation.createdBy === user?.id) {
-                            setIsGroupSettingsOpen(!isGroupSettingsOpen);
-                          }
-                        }}
-                        className={`text-base font-bold truncate flex items-center gap-1.5 ${
-                          activeConversation.isGroup && activeConversation.createdBy === user?.id
-                            ? 'cursor-pointer hover:text-cyan-400 transition'
-                            : ''
-                        }`}
-                      >
-                        {activeConversation.isGroup ? activeConversation.name : recipient?.name}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-base font-bold truncate">
+                          {activeConversation.isGroup ? activeConversation.name : recipient?.name}
+                        </p>
                         {activeConversation.isGroup && activeConversation.createdBy === user?.id && (
-                          <svg className="h-4 w-4 text-slate-400 hover:text-cyan-400 shrink-0 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setErrorMessage('');
+                              setIsGroupSettingsOpen(true);
+                            }}
+                            className="rounded-full hover:bg-slate-900/10 dark:hover:bg-white/10 p-1.5 text-slate-400 hover:text-cyan-400 transition shrink-0"
+                            title="Rename & Manage Group"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
                         )}
-                      </p>
-
-                      {isGroupSettingsOpen && activeConversation.isGroup && activeConversation.createdBy === user?.id && (
-                        <div className={`absolute left-0 mt-2 w-72 rounded-2xl p-4 border shadow-2xl z-30 ${
-                          darkTheme ? 'bg-slate-900 border-white/10 text-slate-100 shadow-cyan-950/20' : 'bg-white border-slate-200 text-slate-900 shadow-slate-300/40'
-                        }`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400">Group Settings</h4>
-                            <button
-                              type="button"
-                              onClick={() => setIsGroupSettingsOpen(false)}
-                              className="text-slate-400 hover:text-rose-500 transition text-xs font-bold"
-                            >
-                              Close
-                            </button>
-                          </div>
-                          
-                          {/* Rename Group */}
-                          <div className="space-y-1.5 mb-4">
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rename Group</label>
-                            <div className="flex gap-2">
-                              <input
-                                value={newGroupName}
-                                onChange={(e) => setNewGroupName(e.target.value)}
-                                className={`flex-1 rounded-xl border px-3 py-2 text-xs outline-none transition focus:border-cyan-500 ${
-                                  darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
-                                }`}
-                                placeholder="Group name"
-                              />
-                              <button
-                                type="button"
-                                onClick={handleRenameGroup}
-                                className="px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold transition"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Manage Members */}
-                          <div className="space-y-1.5">
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Add / Remove Members</label>
-                            <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
-                              {contacts.length === 0 ? (
-                                <p className="text-[10px] text-slate-500 italic">No contacts available.</p>
-                              ) : (
-                                contacts.map((contact) => {
-                                  const isMember = groupMemberIds.includes(contact.id);
-                                  return (
-                                    <label
-                                      key={contact.id}
-                                      className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition ${
-                                        isMember
-                                          ? darkTheme
-                                            ? 'border-cyan-500/35 bg-cyan-500/10 text-cyan-200'
-                                            : 'border-cyan-500/40 bg-cyan-50 text-cyan-800'
-                                          : darkTheme
-                                            ? 'border-white/5 bg-slate-950/20 text-slate-400 hover:bg-slate-800/40'
-                                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={isMember}
-                                        onChange={() => handleToggleMember(contact.id)}
-                                        className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4 w-4"
-                                      />
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate text-xs font-bold">{contact.name}</p>
-                                      </div>
-                                    </label>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
+                      </div>
                       <p className="text-xs text-slate-400 mt-0.5 truncate leading-relaxed">
                         {activeConversation.isGroup
                           ? `Group participants: ${groupParticipantsSummary}`
@@ -1787,6 +1726,151 @@ export default function ChatPage() {
             className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Group Settings Modal (Solid backdrop) */}
+      {isGroupSettingsOpen && activeConversation && activeConversation.isGroup && activeConversation.createdBy === user?.id && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in ${
+          darkTheme ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+        }`}>
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up flex flex-col max-h-[90vh] ${
+            darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20' : 'bg-white border-slate-200 shadow-slate-300/40'
+          }`}>
+            
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10 shrink-0">
+              <h3 className="text-lg font-bold">Group Settings</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGroupSettingsOpen(false);
+                  setErrorMessage('');
+                }}
+                className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {errorMessage && (
+              <div className="mb-4 p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold shrink-0">
+                ⚠️ {errorMessage}
+              </div>
+            )}
+
+            {/* Scrollable Modal Content */}
+            <div className="flex-1 overflow-y-auto space-y-6 pr-1">
+              
+              {/* Rename Section */}
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rename Group</label>
+                <div className="flex gap-2">
+                  <input
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    className={`flex-1 rounded-2xl border px-4 py-2.5 text-sm outline-none transition focus:border-cyan-500 ${
+                      darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
+                    }`}
+                    placeholder="Enter group name"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRenameGroup}
+                    className="px-5 py-2.5 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold transition shadow-lg shadow-cyan-500/25 shrink-0"
+                  >
+                    Rename
+                  </button>
+                </div>
+              </div>
+
+              {/* Members List */}
+              <div className="space-y-4">
+                
+                {/* Current Members Section */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Current Members ({activeConversation.participants.length})
+                  </label>
+                  <div className="space-y-2">
+                    {activeConversation.participants.map((member) => {
+                      const isMemberAdmin = member.id === activeConversation.createdBy;
+                      return (
+                        <div
+                          key={member.id}
+                          className={`flex items-center justify-between p-2.5 rounded-2xl border ${
+                            darkTheme ? 'border-white/5 bg-slate-950/20' : 'border-slate-100 bg-slate-50'
+                          }`}
+                        >
+                          <div className="min-w-0 flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs shrink-0">
+                              {member.name.slice(0, 1).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-bold">{member.name}</p>
+                              {isMemberAdmin && <span className="text-[9px] font-semibold text-cyan-400 uppercase tracking-wider">Admin</span>}
+                            </div>
+                          </div>
+
+                          {!isMemberAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveMember(member.id)}
+                              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold transition shadow-md shadow-rose-600/10"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Add New Members Section */}
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Add New Members
+                  </label>
+                  <div className="space-y-2">
+                    {contacts.filter(c => !groupMemberIds.includes(c.id)).length === 0 ? (
+                      <p className="text-[10px] text-slate-500 italic">All contacts are already in this group.</p>
+                    ) : (
+                      contacts.filter(c => !groupMemberIds.includes(c.id)).map((contact) => (
+                        <div
+                          key={contact.id}
+                          className={`flex items-center justify-between p-2.5 rounded-2xl border ${
+                            darkTheme ? 'border-white/5 bg-slate-950/20' : 'border-slate-100 bg-slate-50'
+                          }`}
+                        >
+                          <div className="min-w-0 flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-500/10 text-slate-400 font-semibold text-xs shrink-0">
+                              {contact.name.slice(0, 1).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-bold">{contact.name}</p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleAddMember(contact.id)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition shadow-md shadow-emerald-600/10"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
         </div>
       )}
 
