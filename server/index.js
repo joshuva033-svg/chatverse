@@ -449,6 +449,41 @@ app.get('/api/conversations/:conversationId/messages', authMiddleware, async (re
   res.json(messages.map((message) => serializeMessage(message)));
 });
 
+app.delete('/api/conversations/:conversationId', authMiddleware, async (req, res) => {
+  const { conversationId } = req.params;
+
+  try {
+    const conversation = await Conversation.findOne({ id: conversationId });
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found.' });
+    }
+
+    if (!conversation.participants.includes(req.user.id)) {
+      return res.status(403).json({ message: 'You are not part of this conversation.' });
+    }
+
+    // Delete all messages in the conversation
+    await Message.deleteMany({ conversationId });
+
+    // Delete the conversation itself
+    await Conversation.deleteOne({ id: conversationId });
+
+    await saveDbBackup();
+
+    // Notify all participants over socket that the conversation was deleted
+    conversation.participants.forEach((pId) => {
+      io.to(pId).emit('conversation_deleted', { conversationId });
+    });
+
+    res.json({ success: true, message: 'Conversation deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ message: 'Server error occurred while deleting conversation.' });
+  }
+});
+
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: corsOptions,

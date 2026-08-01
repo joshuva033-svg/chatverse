@@ -103,6 +103,9 @@ export default function ChatPage() {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedGroupContacts, setSelectedGroupContacts] = useState([]);
+
+  // Delete Chat modal state
+  const [conversationToDelete, setConversationToDelete] = useState(null);
   
   // File uploads and view state
   const [isUploading, setIsUploading] = useState(false);
@@ -384,6 +387,14 @@ export default function ChatPage() {
       );
     });
 
+    socket.on('conversation_deleted', ({ conversationId }) => {
+      setConversations((previous) => previous.filter((conv) => conv.id !== conversationId));
+      setPinnedConversationIds((previous) => previous.filter((id) => id !== conversationId));
+      if (activeConversationIdRef.current === conversationId) {
+        setActiveConversationId(null);
+      }
+    });
+
     socket.on('message_pinned_update', ({ messageId, conversationId, isPinned }) => {
       if (conversationId === activeConversationIdRef.current) {
         setMessages((previous) =>
@@ -486,6 +497,22 @@ export default function ChatPage() {
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error.response?.data?.message || 'Failed to create group.');
+    }
+  };
+
+  const handleDeleteConversation = async (conversationId) => {
+    try {
+      await api.delete(`/api/conversations/${conversationId}`);
+      setConversations((previous) => previous.filter((conv) => conv.id !== conversationId));
+      setPinnedConversationIds((previous) => previous.filter((id) => id !== conversationId));
+      if (activeConversationId === conversationId) {
+        setActiveConversationId(null);
+      }
+      setConversationToDelete(null);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to delete conversation.');
+      setConversationToDelete(null);
     }
   };
 
@@ -923,7 +950,7 @@ export default function ChatPage() {
                       )}
                       {isOnline && <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-400 ring-2 ${darkTheme ? 'ring-slate-900' : 'ring-white'}`} />}
                     </div>
-                    <div className="min-w-0 flex-1 pr-6">
+                    <div className="min-w-0 flex-1 pr-14">
                       <div className="flex items-center justify-between">
                         <p className="truncate text-sm font-semibold">
                           {conversation.isGroup ? conversation.name : (participant?.name || 'Private Chat')}
@@ -935,8 +962,8 @@ export default function ChatPage() {
                       <p className="truncate text-xs text-slate-400 mt-1">{lastMsgText}</p>
                     </div>
 
-                    {/* Pin Action Button */}
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    {/* Chat Action Buttons */}
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                       {isPinned ? (
                         <button
                           type="button"
@@ -960,6 +987,21 @@ export default function ChatPage() {
                           </svg>
                         </button>
                       )}
+
+                      {/* Delete Chat Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConversationToDelete(conversation);
+                        }}
+                        className="opacity-0 group-hover/item:opacity-100 text-slate-400 hover:text-rose-500 transition duration-200"
+                        title="Delete Chat"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 );
@@ -1488,6 +1530,51 @@ export default function ChatPage() {
                   Create Group
                 </button>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Chat Confirmation Modal */}
+        {conversationToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
+            <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl animate-slide-up ${
+              darkTheme ? 'bg-slate-900 border-white/10 shadow-rose-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
+            }`}>
+              <div className="flex items-center gap-3 text-rose-500 mb-4">
+                <div className="p-2 bg-rose-500/10 rounded-full">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-bold">Delete Chat</h3>
+              </div>
+              
+              <p className="text-sm text-slate-400 mb-6">
+                Are you sure you want to delete this chat with <span className="font-semibold text-slate-200">{
+                  conversationToDelete.isGroup 
+                    ? conversationToDelete.name 
+                    : (conversationToDelete.participants.find(p => p.id !== user?.id)?.name || 'Private Chat')
+                }</span>? This action is permanent and will delete all messages for all participants.
+              </p>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setConversationToDelete(null)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-full border transition duration-300 ${
+                    darkTheme ? 'border-white/10 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteConversation(conversationToDelete.id)}
+                  className="px-4 py-2 text-xs font-semibold rounded-full bg-rose-600 hover:bg-rose-500 text-white transition duration-300"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         )}
