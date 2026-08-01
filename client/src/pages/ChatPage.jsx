@@ -979,7 +979,7 @@ export default function ChatPage() {
                         <button
                           type="button"
                           onClick={(e) => togglePinConversation(e, conversation.id)}
-                          className="opacity-0 group-hover/item:opacity-100 text-slate-400 hover:text-cyan-500 transition duration-200"
+                          className="opacity-100 lg:opacity-0 lg:group-hover/item:opacity-100 text-slate-400 hover:text-cyan-500 transition duration-200"
                           title="Pin Chat"
                         >
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -995,7 +995,7 @@ export default function ChatPage() {
                           e.stopPropagation();
                           setConversationToDelete(conversation);
                         }}
-                        className="opacity-0 group-hover/item:opacity-100 text-slate-400 hover:text-rose-500 transition duration-200"
+                        className="opacity-100 lg:opacity-0 lg:group-hover/item:opacity-100 text-slate-400 hover:text-rose-500 transition duration-200"
                         title="Delete Chat"
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
