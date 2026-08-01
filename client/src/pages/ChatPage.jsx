@@ -106,6 +106,11 @@ export default function ChatPage() {
 
   // Delete Chat modal state
   const [conversationToDelete, setConversationToDelete] = useState(null);
+
+  // Group settings state
+  const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [groupMemberIds, setGroupMemberIds] = useState([]);
   
   // File uploads and view state
   const [isUploading, setIsUploading] = useState(false);
@@ -177,6 +182,17 @@ export default function ChatPage() {
     () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
     [activeConversationId, conversations],
   );
+
+  useEffect(() => {
+    setIsGroupSettingsOpen(false);
+    if (activeConversation && activeConversation.isGroup) {
+      setNewGroupName(activeConversation.name || '');
+      setGroupMemberIds(activeConversation.participants.map((p) => p.id));
+    } else {
+      setNewGroupName('');
+      setGroupMemberIds([]);
+    }
+  }, [activeConversation]);
 
   const pinnedMessages = useMemo(() => {
     return messages.filter((msg) => msg.isPinned);
@@ -395,6 +411,21 @@ export default function ChatPage() {
       }
     });
 
+    socket.on('group_updated', (updatedConv) => {
+      const isParticipant = updatedConv.participants.some((p) => p.id === user?.id);
+
+      if (!isParticipant) {
+        setConversations((previous) => previous.filter((conv) => conv.id !== updatedConv.id));
+        if (activeConversationIdRef.current === updatedConv.id) {
+          setActiveConversationId(null);
+        }
+      } else {
+        setConversations((previous) =>
+          previous.map((conv) => (conv.id === updatedConv.id ? updatedConv : conv))
+        );
+      }
+    });
+
     socket.on('message_pinned_update', ({ messageId, conversationId, isPinned }) => {
       if (conversationId === activeConversationIdRef.current) {
         setMessages((previous) =>
@@ -513,6 +544,51 @@ export default function ChatPage() {
     } catch (error) {
       setErrorMessage(error.response?.data?.message || 'Failed to delete conversation.');
       setConversationToDelete(null);
+    }
+  };
+
+  const handleRenameGroup = async () => {
+    if (!activeConversation || !newGroupName.trim()) return;
+
+    try {
+      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
+        name: newGroupName.trim(),
+      });
+      setConversations((previous) =>
+        previous.map((conv) => (conv.id === data.id ? data : conv))
+      );
+      setErrorMessage('');
+      setIsGroupSettingsOpen(false);
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to rename group.');
+    }
+  };
+
+  const handleToggleMember = async (contactId) => {
+    if (!activeConversation) return;
+
+    let updatedIds;
+    if (groupMemberIds.includes(contactId)) {
+      updatedIds = groupMemberIds.filter((id) => id !== contactId);
+    } else {
+      updatedIds = [...groupMemberIds, contactId];
+    }
+
+    if (user?.id && !updatedIds.includes(user.id)) {
+      updatedIds.push(user.id);
+    }
+
+    try {
+      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
+        participantIds: updatedIds,
+      });
+      setGroupMemberIds(data.participants.map((p) => p.id));
+      setConversations((previous) =>
+        previous.map((conv) => (conv.id === data.id ? data : conv))
+      );
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to update group members.');
     }
   };
 
@@ -768,7 +844,10 @@ export default function ChatPage() {
 
                   <button
                     type="button"
-                    onClick={() => setIsGroupModalOpen(true)}
+                    onClick={() => {
+                      setErrorMessage('');
+                      setIsGroupModalOpen(true);
+                    }}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-50 hover:text-white transition duration-300"
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1045,10 +1124,104 @@ export default function ChatPage() {
                         </svg>
                       </div>
                     )}
-                    <div className="min-w-0">
-                      <p className="text-base font-bold truncate">
+                    <div className="min-w-0 relative">
+                      <p
+                        onClick={() => {
+                          if (activeConversation.isGroup && activeConversation.createdBy === user?.id) {
+                            setIsGroupSettingsOpen(!isGroupSettingsOpen);
+                          }
+                        }}
+                        className={`text-base font-bold truncate flex items-center gap-1.5 ${
+                          activeConversation.isGroup && activeConversation.createdBy === user?.id
+                            ? 'cursor-pointer hover:text-cyan-400 transition'
+                            : ''
+                        }`}
+                      >
                         {activeConversation.isGroup ? activeConversation.name : recipient?.name}
+                        {activeConversation.isGroup && activeConversation.createdBy === user?.id && (
+                          <svg className="h-4 w-4 text-slate-400 hover:text-cyan-400 shrink-0 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                        )}
                       </p>
+
+                      {isGroupSettingsOpen && activeConversation.isGroup && activeConversation.createdBy === user?.id && (
+                        <div className={`absolute left-0 mt-2 w-72 rounded-2xl p-4 border shadow-2xl z-30 ${
+                          darkTheme ? 'bg-slate-900 border-white/10 text-slate-100 shadow-cyan-950/20' : 'bg-white border-slate-200 text-slate-900 shadow-slate-300/40'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400">Group Settings</h4>
+                            <button
+                              type="button"
+                              onClick={() => setIsGroupSettingsOpen(false)}
+                              className="text-slate-400 hover:text-rose-500 transition text-xs font-bold"
+                            >
+                              Close
+                            </button>
+                          </div>
+                          
+                          {/* Rename Group */}
+                          <div className="space-y-1.5 mb-4">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rename Group</label>
+                            <div className="flex gap-2">
+                              <input
+                                value={newGroupName}
+                                onChange={(e) => setNewGroupName(e.target.value)}
+                                className={`flex-1 rounded-xl border px-3 py-2 text-xs outline-none transition focus:border-cyan-500 ${
+                                  darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
+                                }`}
+                                placeholder="Group name"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleRenameGroup}
+                                className="px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold transition"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Manage Members */}
+                          <div className="space-y-1.5">
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Add / Remove Members</label>
+                            <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                              {contacts.length === 0 ? (
+                                <p className="text-[10px] text-slate-500 italic">No contacts available.</p>
+                              ) : (
+                                contacts.map((contact) => {
+                                  const isMember = groupMemberIds.includes(contact.id);
+                                  return (
+                                    <label
+                                      key={contact.id}
+                                      className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition ${
+                                        isMember
+                                          ? darkTheme
+                                            ? 'border-cyan-500/35 bg-cyan-500/10 text-cyan-200'
+                                            : 'border-cyan-500/40 bg-cyan-50 text-cyan-800'
+                                          : darkTheme
+                                            ? 'border-white/5 bg-slate-950/20 text-slate-400 hover:bg-slate-800/40'
+                                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isMember}
+                                        onChange={() => handleToggleMember(contact.id)}
+                                        className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4 w-4"
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-xs font-bold">{contact.name}</p>
+                                      </div>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-xs text-slate-400 mt-0.5 truncate leading-relaxed">
                         {activeConversation.isGroup
                           ? `Group participants: ${groupParticipantsSummary}`
@@ -1444,165 +1617,179 @@ export default function ChatPage() {
           </main>
         </div>
 
-        {/* Group Modal */}
-        {isGroupModalOpen && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
-            <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up ${
-              darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20' : 'bg-white border-slate-200 shadow-slate-300/40'
-            }`}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold">Create Group Conversation</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsGroupModalOpen(false);
-                    setGroupName('');
-                    setSelectedGroupContacts([]);
-                  }}
-                  className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+      </div> {/* Close max-w-7xl */}
 
-              <form onSubmit={handleCreateGroup} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Group Name</label>
-                  <input
-                    value={groupName}
-                    onChange={(e) => setGroupName(e.target.value)}
-                    className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-cyan-500 ${
-                      darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
-                    }`}
-                    placeholder="Project Alpha, Family group, etc."
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Select Members</label>
-                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                    {contacts.length === 0 ? (
-                      <p className="text-xs text-slate-500 italic">No contacts available to add.</p>
-                    ) : (
-                      contacts.map((contact) => {
-                        const isChecked = selectedGroupContacts.includes(contact.id);
-                        return (
-                          <label
-                            key={contact.id}
-                            className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition ${
-                              darkTheme ? 'border-white/5 bg-slate-950/40 hover:bg-slate-800/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setSelectedGroupContacts(selectedGroupContacts.filter((id) => id !== contact.id));
-                                } else {
-                                  setSelectedGroupContacts([...selectedGroupContacts, contact.id]);
-                                }
-                              }}
-                              className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4.5 w-4.5"
-                            />
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs">
-                              {contact.name.slice(0, 1).toUpperCase()}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-bold">{contact.name}</p>
-                              <p className="truncate text-[10px] text-slate-400">{contact.email}</p>
-                            </div>
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!groupName.trim() || selectedGroupContacts.length === 0}
-                  className="w-full rounded-2xl bg-cyan-500 py-3 text-sm font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/25"
-                >
-                  Create Group
-                </button>
-              </form>
+      {/* Group Modal */}
+      {isGroupModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up ${
+            darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
+          }`}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Create Group Conversation</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGroupModalOpen(false);
+                  setGroupName('');
+                  setSelectedGroupContacts([]);
+                  setErrorMessage('');
+                }}
+                className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-          </div>
-        )}
 
-        {/* Delete Chat Confirmation Modal */}
-        {conversationToDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
-            <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl animate-slide-up ${
-              darkTheme ? 'bg-slate-900 border-white/10 shadow-rose-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
-            }`}>
-              <div className="flex items-center gap-3 text-rose-500 mb-4">
-                <div className="p-2 bg-rose-500/10 rounded-full">
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
+            <form onSubmit={handleCreateGroup} className="space-y-4">
+              {errorMessage && (
+                <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold">
+                  ⚠️ {errorMessage}
                 </div>
-                <h3 className="text-lg font-bold">Delete Chat</h3>
-              </div>
-              
-              <p className="text-sm text-slate-400 mb-6">
-                Are you sure you want to delete this chat with <span className="font-semibold text-slate-200">{
-                  conversationToDelete.isGroup 
-                    ? conversationToDelete.name 
-                    : (conversationToDelete.participants.find(p => p.id !== user?.id)?.name || 'Private Chat')
-                }</span>? This action is permanent and will delete all messages for all participants.
-              </p>
+              )}
 
-              <div className="flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setConversationToDelete(null)}
-                  className={`px-4 py-2 text-xs font-semibold rounded-full border transition duration-300 ${
-                    darkTheme ? 'border-white/10 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Group Name</label>
+                <input
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-cyan-500 ${
+                    darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
                   }`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteConversation(conversationToDelete.id)}
-                  className="px-4 py-2 text-xs font-semibold rounded-full bg-rose-600 hover:bg-rose-500 text-white transition duration-300"
-                >
-                  Delete
-                </button>
+                  placeholder="Project Alpha, Family group, etc."
+                  required
+                />
               </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Select Members</label>
+                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                  {contacts.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic">No contacts available to add.</p>
+                  ) : (
+                    contacts.map((contact) => {
+                      const isChecked = selectedGroupContacts.includes(contact.id);
+                      return (
+                        <label
+                          key={contact.id}
+                          className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition ${
+                            isChecked
+                              ? darkTheme
+                                ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 shadow-md shadow-cyan-950/10'
+                                : 'border-cyan-500/40 bg-cyan-50 text-cyan-800 shadow-md shadow-cyan-100/30'
+                              : darkTheme
+                                ? 'border-white/5 bg-slate-950/40 text-slate-400 hover:bg-slate-800/40'
+                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              if (isChecked) {
+                                setSelectedGroupContacts(selectedGroupContacts.filter((id) => id !== contact.id));
+                              } else {
+                                setSelectedGroupContacts([...selectedGroupContacts, contact.id]);
+                              }
+                            }}
+                            className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4.5 w-4.5"
+                          />
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs">
+                            {contact.name.slice(0, 1).toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-bold">{contact.name}</p>
+                            <p className="truncate text-[10px] text-slate-400">{contact.email}</p>
+                          </div>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={!groupName.trim() || selectedGroupContacts.length === 0}
+                className="w-full rounded-2xl bg-cyan-500 py-3 text-sm font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/25"
+              >
+                Create Group
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Chat Confirmation Modal */}
+      {conversationToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
+          <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl animate-slide-up ${
+            darkTheme ? 'bg-slate-900 border-white/10 shadow-rose-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
+          }`}>
+            <div className="flex items-center gap-3 text-rose-500 mb-4">
+              <div className="p-2 bg-rose-500/10 rounded-full">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold">Delete Chat</h3>
+            </div>
+            
+            <p className="text-sm text-slate-400 mb-6">
+              Are you sure you want to delete this chat with <span className="font-semibold text-slate-200">{
+                conversationToDelete.isGroup 
+                  ? conversationToDelete.name 
+                  : (conversationToDelete.participants.find(p => p.id !== user?.id)?.name || 'Private Chat')
+              }</span>? This action is permanent and will delete all messages for all participants.
+            </p>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setConversationToDelete(null)}
+                className={`px-4 py-2 text-xs font-semibold rounded-full border transition duration-300 ${
+                  darkTheme ? 'border-white/10 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteConversation(conversationToDelete.id)}
+                className="px-4 py-2 text-xs font-semibold rounded-full bg-rose-600 hover:bg-rose-500 text-white transition duration-300"
+              >
+                Delete
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Photo Lightbox */}
-        {lightboxImageUrl && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-4 animate-fade-in cursor-zoom-out"
-            onClick={() => setLightboxImageUrl(null)}
+      {/* Photo Lightbox */}
+      {lightboxImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-4 animate-fade-in cursor-zoom-out"
+          onClick={() => setLightboxImageUrl(null)}
+        >
+          <button
+            type="button"
+            className="absolute top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition duration-200"
           >
-            <button
-              type="button"
-              className="absolute top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition duration-200"
-            >
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            <img
-              src={lightboxImageUrl}
-              alt="Preview"
-              className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl animate-slide-up"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        )}
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            src={lightboxImageUrl}
+            alt="Preview"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
 
-      </div>
     </div>
   );
 }

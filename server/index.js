@@ -483,6 +483,79 @@ app.delete('/api/conversations/:conversationId', authMiddleware, async (req, res
   }
 });
 
+app.put('/api/conversations/:conversationId', authMiddleware, async (req, res) => {
+  const { conversationId } = req.params;
+  const { name, participantIds } = req.body;
+
+  try {
+    const conversation = await Conversation.findOne({ id: conversationId });
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found.' });
+    }
+
+    if (!conversation.isGroup) {
+      return res.status(400).json({ message: 'Only group conversations can be updated.' });
+    }
+
+    // Check if the user is the admin (creator) of the group
+    if (conversation.createdBy !== req.user.id) {
+      return res.status(403).json({ message: 'Only the group admin can update group settings.' });
+    }
+
+    // Capture original participants to notify
+    const originalParticipants = [...conversation.participants];
+
+    if (name !== undefined) {
+      if (!name.trim()) {
+        return res.status(400).json({ message: 'Group name cannot be empty.' });
+      }
+      conversation.name = name.trim();
+    }
+
+    if (participantIds !== undefined) {
+      if (!Array.isArray(participantIds) || participantIds.length === 0) {
+        return res.status(400).json({ message: 'Group must have at least one participant.' });
+      }
+      // Ensure the admin is always a participant
+      const allParticipants = [...new Set([...participantIds, req.user.id])];
+      conversation.participants = allParticipants;
+    }
+
+    conversation.updatedAt = new Date();
+    await conversation.save();
+    await saveDbBackup();
+
+    // Fetch full participant details to return to the client
+    const participants = await User.find({ id: { $in: conversation.participants } }).lean();
+    
+    // Find last message details if exists
+    const lastMessage = conversation.lastMessage ? await Message.findOne({ id: conversation.lastMessage }) : null;
+
+    const updatedConv = {
+      id: conversation.id,
+      participants: participants.map((participant) => serialiseParticipant(participant)),
+      lastMessage: lastMessage ? serializeMessage(lastMessage) : null,
+      updatedAt: conversation.updatedAt,
+      unreadCount: 0,
+      isGroup: true,
+      name: conversation.name,
+      createdBy: conversation.createdBy,
+    };
+
+    // Notify all participants (new and old) over socket
+    const allNotifiedUserIds = [...new Set([...originalParticipants, ...conversation.participants])];
+    allNotifiedUserIds.forEach((pId) => {
+      io.to(pId).emit('group_updated', updatedConv);
+    });
+
+    res.json(updatedConv);
+  } catch (error) {
+    console.error('Error updating group:', error);
+    res.status(500).json({ message: 'Server error occurred while updating group.' });
+  }
+});
+
 
 const server = http.createServer(app);
 const io = new Server(server, {
