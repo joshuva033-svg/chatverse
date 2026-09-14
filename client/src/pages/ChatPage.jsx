@@ -551,7 +551,7 @@ export default function ChatPage() {
         <div className="flex flex-1 overflow-hidden">
           
           {/* Sidebar */}
-          <aside className={`w-full lg:w-[380px] flex flex-col shrink-0 transition-colors ${sidebarClass}`}>
+          <aside className={`w-full lg:w-[380px] flex-col shrink-0 transition-colors ${sidebarClass} ${activeConversationId ? 'hidden lg:flex' : 'flex'}`}>
             {/* Sidebar Top Header */}
             <div className={`p-5 ${sidebarHeaderClass}`}>
               <div className="flex items-center justify-between">
@@ -813,12 +813,25 @@ export default function ChatPage() {
           </aside>
 
           {/* Active Chat Section */}
-          <main className="flex flex-1 flex-col bg-slate-950/5">
+          <main className={`flex-1 flex-col bg-slate-950/5 ${activeConversationId ? 'flex' : 'hidden lg:flex'}`}>
             {activeConversation ? (
               <>
                 {/* Active Chat Header */}
-                <header className={`flex items-center justify-between px-5 py-4 shrink-0 backdrop-blur-md transition-colors ${chatHeaderClass}`}>
-                  <div className="min-w-0 flex items-center gap-3">
+                <header className={`flex items-center justify-between px-4 sm:px-5 py-3.5 shrink-0 backdrop-blur-md transition-colors ${chatHeaderClass}`}>
+                  <div className="min-w-0 flex items-center gap-2.5 sm:gap-3">
+                    {/* Back to chats button for mobile / responsive */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveConversationId(null)}
+                      className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 px-2 py-1.5 -ml-1 rounded-xl border border-cyan-500/20 bg-cyan-500/10 hover:bg-cyan-500/20 transition duration-200 lg:hidden shrink-0"
+                      title="Back to all chats"
+                      aria-label="Back to chats list"
+                    >
+                      <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                      </svg>
+                      <span className="text-xs font-bold">Chats</span>
+                    </button>
                     {/* Avatar display */}
                     {!activeConversation.isGroup && (
                       recipient?.avatarUrl ? (
