@@ -155,21 +155,6 @@ export default function ProfilePage() {
                 <div className="min-w-0 flex-1">
                   <p className="text-xl font-bold truncate">{user?.name}</p>
                   <p className={`text-xs truncate ${darkTheme ? 'text-slate-400' : 'text-slate-500'}`}>{user?.email}</p>
-                  {avatarUrl && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAvatarUrl('');
-                        setMessage('Avatar photo removed! Click "Save Profile" below to persist changes.');
-                      }}
-                      className="mt-2 text-xs font-semibold text-rose-400 hover:text-rose-300 transition duration-300 flex items-center gap-1.5 hover:underline"
-                    >
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                      Remove photo
-                    </button>
-                  )}
                 </div>
               </div>
 

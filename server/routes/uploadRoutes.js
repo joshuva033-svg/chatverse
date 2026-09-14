@@ -2,8 +2,14 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
 
+import fs from 'node:fs';
+
 const router = Router();
 const uploadDirectory = path.resolve(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDirectory)) {
+  fs.mkdirSync(uploadDirectory, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDirectory),
   filename: (_req, file, cb) => {

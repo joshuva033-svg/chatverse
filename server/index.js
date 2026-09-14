@@ -7,13 +7,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
-import { connectDb, saveDbBackup, restoreDbBackup } from './db.js';
+import { connectDb } from './db.js';
 import User from './models/User.js';
 import Conversation from './models/Conversation.js';
 import Message from './models/Message.js';
 import path from 'node:path';
 import uploadRoutes from './routes/uploadRoutes.js';
-import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -33,15 +32,9 @@ const allowedOrigins = new Set([
 ].filter(Boolean));
 
 const localNetworkOriginPattern = /^https?:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):\d+$/;
-const vercelOriginPattern = /^https?:\/\/[a-zA-Z0-9-]+\.vercel\.app$/;
 const corsOptions = {
   origin: (origin, callback) => {
-    if (
-      !origin ||
-      allowedOrigins.has(origin) ||
-      localNetworkOriginPattern.test(origin) ||
-      vercelOriginPattern.test(origin)
-    ) {
+    if (!origin || allowedOrigins.has(origin) || localNetworkOriginPattern.test(origin) || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
       callback(new Error(`CORS policy does not allow access from ${origin}`));
@@ -84,7 +77,6 @@ function serializeUser(user) {
     avatarUrl: user.avatarUrl || null,
     status: user.status || 'Hey there! I am using Chat-Verse.',
     readReceipts: user.readReceipts !== false,
-    lastSeen: user.lastSeen || new Date(),
   };
 }
 
@@ -96,7 +88,6 @@ function serialiseParticipant(participant) {
     avatar: participant.avatar || participant.name?.slice(0, 1).toUpperCase() || 'U',
     avatarUrl: participant.avatarUrl || null,
     status: participant.status || 'Hey there! I am using Chat-Verse.',
-    lastSeen: participant.lastSeen || new Date(),
   };
 }
 
@@ -113,8 +104,6 @@ function serializeMessage(message) {
     fileType: message.fileType,
     fileSize: message.fileSize,
     replyToMessageId: message.replyToMessageId || null,
-    isPinned: message.isPinned === true,
-    deletedBy: message.deletedBy || [],
   };
 }
 
@@ -148,8 +137,6 @@ app.post('/api/auth/register', async (req, res) => {
     avatar: (name || 'U').charAt(0).toUpperCase(),
   });
 
-  await saveDbBackup();
-
   const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ user: serializeUser(user), token });
 });
@@ -170,102 +157,6 @@ app.post('/api/auth/login', async (req, res) => {
 
   const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ user: serializeUser(user), token });
-});
-
-app.post('/api/auth/forgot-password', async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ message: 'Please provide an email address.' });
-  }
-
-  const user = await User.findOne({ email });
-  if (!user) {
-    return res.status(404).json({ message: 'No account exists with this email.' });
-  }
-
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  user.resetCode = code;
-  await user.save();
-  await saveDbBackup();
-
-  const emailUser = process.env.EMAIL_USER;
-  const emailPass = process.env.EMAIL_PASS;
-
-  if (emailUser && emailPass) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: emailUser,
-          pass: emailPass,
-        },
-      });
-
-      const mailOptions = {
-        from: `"Chat-Verse Security" <${emailUser}>`,
-        to: email,
-        subject: 'Your Password Recovery Code',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-            <h2 style="color: #06b6d4; text-align: center;">Chat-Verse Password Recovery</h2>
-            <p>Hello,</p>
-            <p>You requested a password reset for your account. Please use the following 6-digit verification code to reset your password:</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <span style="font-size: 24px; font-weight: bold; background: #f1f5f9; padding: 10px 30px; border-radius: 8px; border: 1px solid #cbd5e1; letter-spacing: 4px; color: #0f172a;">
-                ${code}
-              </span>
-            </div>
-            <p style="color: #64748b; font-size: 12px; text-align: center;">This code will expire once used. If you did not make this request, please ignore this email.</p>
-          </div>
-        `,
-      };
-
-      await transporter.sendMail(mailOptions);
-      return res.json({ message: 'A password recovery code has been sent to your email address.' });
-    } catch (err) {
-      console.error('[Nodemailer Error]', err);
-      return res.json({
-        message: 'Email failed to send. Using simulated code.',
-        code,
-        simulated: true,
-      });
-    }
-  }
-
-  res.json({
-    message: 'Local simulation: recovery code generated.',
-    code,
-    simulated: true,
-  });
-});
-
-app.post('/api/auth/reset-password', async (req, res) => {
-  const { email, code, newPassword } = req.body;
-
-  if (!email || !code || !newPassword) {
-    return res.status(400).json({ message: 'Please provide all details (email, code, and new password).' });
-  }
-
-  if (newPassword.length < 6) {
-    return res.status(400).json({ message: 'Password must be at least 6 characters.' });
-  }
-
-  const user = await User.findOne({ email });
-  if (!user) {
-    return res.status(404).json({ message: 'User not found.' });
-  }
-
-  if (!user.resetCode || user.resetCode !== code) {
-    return res.status(400).json({ message: 'Invalid or expired recovery code.' });
-  }
-
-  user.passwordHash = bcrypt.hashSync(newPassword, 10);
-  user.resetCode = null;
-  await user.save();
-  await saveDbBackup();
-
-  res.json({ message: 'Password reset successful! Please sign in with your new password.' });
 });
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
@@ -334,7 +225,6 @@ app.put('/api/users/me/profile', authMiddleware, async (req, res) => {
   }
 
   await user.save();
-  await saveDbBackup();
 
   res.json({ user: serializeUser(user) });
 });
@@ -346,13 +236,18 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   for (const conversation of conversations) {
     const participants = await User.find({ id: { $in: conversation.participants } }).lean();
     const lastMessage = conversation.lastMessage ? await Message.findOne({ id: conversation.lastMessage }) : null;
+    const unreadCount = await Message.countDocuments({
+      conversationId: conversation.id,
+      senderId: { $ne: req.user.id },
+      readAt: null,
+    });
 
     enriched.push({
       id: conversation.id,
       participants: participants.map((participant) => serialiseParticipant(participant)),
       lastMessage: lastMessage ? serializeMessage(lastMessage) : null,
       updatedAt: conversation.updatedAt,
-      unreadCount: 0,
+      unreadCount,
       isGroup: conversation.isGroup || false,
       name: conversation.name || '',
       createdBy: conversation.createdBy || '',
@@ -375,8 +270,8 @@ app.post('/api/conversations', authMiddleware, async (req, res) => {
   }
 
   let conversation = await Conversation.findOne({
-    isGroup: false,
     participants: { $all: [req.user.id, participantId] },
+    $expr: { $eq: [{ $size: '$participants' }, 2] },
   });
 
   if (!conversation) {
@@ -385,7 +280,6 @@ app.post('/api/conversations', authMiddleware, async (req, res) => {
       participants: [req.user.id, participantId],
       updatedAt: new Date(),
     });
-    await saveDbBackup();
   }
 
   const participants = await User.find({ id: { $in: conversation.participants } }).lean();
@@ -419,8 +313,6 @@ app.post('/api/conversations/group', authMiddleware, async (req, res) => {
     updatedAt: new Date(),
   });
 
-  await saveDbBackup();
-
   const participants = await User.find({ id: { $in: conversation.participants } }).lean();
   res.status(201).json({
     id: conversation.id,
@@ -445,117 +337,9 @@ app.get('/api/conversations/:conversationId/messages', authMiddleware, async (re
     return res.status(403).json({ message: 'You are not part of this conversation.' });
   }
 
-  const messages = await Message.find({ conversationId: conversation.id, deletedBy: { $ne: req.user.id } }).sort({ createdAt: 1 });
+  const messages = await Message.find({ conversationId: conversation.id }).sort({ createdAt: 1 });
   res.json(messages.map((message) => serializeMessage(message)));
 });
-
-app.delete('/api/conversations/:conversationId', authMiddleware, async (req, res) => {
-  const { conversationId } = req.params;
-
-  try {
-    const conversation = await Conversation.findOne({ id: conversationId });
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation not found.' });
-    }
-
-    if (!conversation.participants.includes(req.user.id)) {
-      return res.status(403).json({ message: 'You are not part of this conversation.' });
-    }
-
-    // Delete all messages in the conversation
-    await Message.deleteMany({ conversationId });
-
-    // Delete the conversation itself
-    await Conversation.deleteOne({ id: conversationId });
-
-    await saveDbBackup();
-
-    // Notify all participants over socket that the conversation was deleted
-    conversation.participants.forEach((pId) => {
-      io.to(pId).emit('conversation_deleted', { conversationId });
-    });
-
-    res.json({ success: true, message: 'Conversation deleted successfully.' });
-  } catch (error) {
-    console.error('Error deleting conversation:', error);
-    res.status(500).json({ message: 'Server error occurred while deleting conversation.' });
-  }
-});
-
-app.put('/api/conversations/:conversationId', authMiddleware, async (req, res) => {
-  const { conversationId } = req.params;
-  const { name, participantIds } = req.body;
-
-  try {
-    const conversation = await Conversation.findOne({ id: conversationId });
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation not found.' });
-    }
-
-    if (!conversation.isGroup) {
-      return res.status(400).json({ message: 'Only group conversations can be updated.' });
-    }
-
-    // Check if the user is the admin (creator) of the group
-    if (conversation.createdBy !== req.user.id) {
-      return res.status(403).json({ message: 'Only the group admin can update group settings.' });
-    }
-
-    // Capture original participants to notify
-    const originalParticipants = [...conversation.participants];
-
-    if (name !== undefined) {
-      if (!name.trim()) {
-        return res.status(400).json({ message: 'Group name cannot be empty.' });
-      }
-      conversation.name = name.trim();
-    }
-
-    if (participantIds !== undefined) {
-      if (!Array.isArray(participantIds) || participantIds.length === 0) {
-        return res.status(400).json({ message: 'Group must have at least one participant.' });
-      }
-      // Ensure the admin is always a participant
-      const allParticipants = [...new Set([...participantIds, req.user.id])];
-      conversation.participants = allParticipants;
-    }
-
-    conversation.updatedAt = new Date();
-    await conversation.save();
-    await saveDbBackup();
-
-    // Fetch full participant details to return to the client
-    const participants = await User.find({ id: { $in: conversation.participants } }).lean();
-    
-    // Find last message details if exists
-    const lastMessage = conversation.lastMessage ? await Message.findOne({ id: conversation.lastMessage }) : null;
-
-    const updatedConv = {
-      id: conversation.id,
-      participants: participants.map((participant) => serialiseParticipant(participant)),
-      lastMessage: lastMessage ? serializeMessage(lastMessage) : null,
-      updatedAt: conversation.updatedAt,
-      unreadCount: 0,
-      isGroup: true,
-      name: conversation.name,
-      createdBy: conversation.createdBy,
-    };
-
-    // Notify all participants (new and old) over socket
-    const allNotifiedUserIds = [...new Set([...originalParticipants, ...conversation.participants])];
-    allNotifiedUserIds.forEach((pId) => {
-      io.to(pId).emit('group_updated', updatedConv);
-    });
-
-    res.json(updatedConv);
-  } catch (error) {
-    console.error('Error updating group:', error);
-    res.status(500).json({ message: 'Server error occurred while updating group.' });
-  }
-});
-
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -575,10 +359,6 @@ io.on('connection', (socket) => {
       socket.userId = user.id;
       socketUsers.set(socket.id, user.id);
       socket.join(user.id);
-
-      user.lastSeen = new Date();
-      await user.save();
-
       io.emit('presence_update', { onlineUserIds: [...new Set([...socketUsers.values()])] });
     } catch (error) {
       console.error('Socket auth failed', error);
@@ -651,8 +431,6 @@ io.on('connection', (socket) => {
     conversation.updatedAt = new Date();
     await conversation.save();
 
-    await saveDbBackup();
-
     console.log('[Server] broadcasting new_message to all participants');
     conversation.participants.forEach((pId) => {
       io.to(pId).emit('new_message', serializeMessage(message));
@@ -682,7 +460,6 @@ io.on('connection', (socket) => {
     const messageIds = unreadMessages.map((message) => message.id);
 
     await Message.updateMany({ conversationId, senderId: { $ne: socket.userId }, readAt: null }, { readAt: new Date() });
-    await saveDbBackup();
 
     if (messageIds.length > 0) {
       io.to(conversationId).emit('message_read', {
@@ -692,137 +469,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('delete_message', async ({ messageId, deleteType }, callback) => {
-    if (!socket.userId || !messageId || !deleteType) {
-      callback?.({ success: false, message: 'Invalid request' });
-      return;
-    }
-
-    try {
-      const message = await Message.findOne({ id: messageId });
-      if (!message) {
-        callback?.({ success: false, message: 'Message not found' });
-        return;
-      }
-
-      const conversation = await Conversation.findOne({ id: message.conversationId });
-      if (!conversation) {
-        callback?.({ success: false, message: 'Conversation not found' });
-        return;
-      }
-
-      if (deleteType === 'both') {
-        if (message.senderId !== socket.userId) {
-          callback?.({ success: false, message: 'Unauthorized' });
-          return;
-        }
-
-        await Message.deleteOne({ id: messageId });
-
-        if (conversation.lastMessage === messageId) {
-          const remainingMsg = await Message.findOne({ conversationId: conversation.id }).sort({ createdAt: -1 });
-          conversation.lastMessage = remainingMsg ? remainingMsg.id : null;
-          await conversation.save();
-        }
-
-        conversation.participants.forEach((pId) => {
-          io.to(pId).emit('message_deleted', {
-            messageId,
-            conversationId: conversation.id,
-            deleteType: 'both',
-          });
-        });
-      } else if (deleteType === 'me') {
-        await Message.updateOne({ id: messageId }, { $addToSet: { deletedBy: socket.userId } });
-
-        io.to(socket.userId).emit('message_deleted', {
-          messageId,
-          conversationId: conversation.id,
-          deleteType: 'me',
-          userId: socket.userId,
-        });
-      }
-
-      await saveDbBackup();
-      callback?.({ success: true });
-    } catch (error) {
-      console.error('Error deleting message:', error);
-      callback?.({ success: false, message: 'Server error' });
-    }
-  });
-
-  socket.on('toggle_pin_message', async ({ messageId }, callback) => {
-    if (!socket.userId || !messageId) {
-      callback?.({ success: false, message: 'Invalid request' });
-      return;
-    }
-
-    try {
-      const message = await Message.findOne({ id: messageId });
-      if (!message) {
-        callback?.({ success: false, message: 'Message not found' });
-        return;
-      }
-
-      const conversation = await Conversation.findOne({ id: message.conversationId });
-      if (!conversation) {
-        callback?.({ success: false, message: 'Conversation not found' });
-        return;
-      }
-
-      if (!conversation.participants.includes(socket.userId)) {
-        callback?.({ success: false, message: 'Unauthorized' });
-        return;
-      }
-
-      message.isPinned = !message.isPinned;
-      await message.save();
-      await saveDbBackup();
-
-      conversation.participants.forEach((pId) => {
-        io.to(pId).emit('message_pinned_update', {
-          messageId,
-          conversationId: conversation.id,
-          isPinned: message.isPinned,
-        });
-      });
-
-      callback?.({ success: true, isPinned: message.isPinned });
-    } catch (error) {
-      console.error('Error pinning message:', error);
-      callback?.({ success: false, message: 'Server error' });
-    }
-  });
-
-  socket.on('disconnect', async () => {
+  socket.on('disconnect', () => {
     if (socket.userId) {
       socketUsers.delete(socket.id);
-
-      const stillConnected = [...socketUsers.values()].includes(socket.userId);
-      const onlineUserIds = [...new Set([...socketUsers.values()])];
-
-      if (!stillConnected) {
-        const lastSeenTime = new Date();
-        await User.updateOne({ id: socket.userId }, { lastSeen: lastSeenTime });
-        await saveDbBackup();
-
-        io.emit('presence_update', {
-          onlineUserIds,
-          userId: socket.userId,
-          lastSeen: lastSeenTime.toISOString(),
-        });
-      } else {
-        io.emit('presence_update', { onlineUserIds });
-      }
+      io.emit('presence_update', { onlineUserIds: [...new Set([...socketUsers.values()])] });
     }
   });
 });
 
 connectDb()
   .then(async () => {
-    if (!process.env.MONGODB_URI) {
-      await restoreDbBackup();
-    }
     const removedCount = await removeBlockedUsers();
     if (removedCount > 0) {
       console.log(`Removed ${removedCount} blocked test/demo users.`);

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
@@ -48,13 +49,13 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   let conversation = await Conversation.findOne({
-    isGroup: false,
     participants: { $all: [req.user.id, participantId] },
+    $expr: { $eq: [{ $size: '$participants' }, 2] },
   });
 
   if (!conversation) {
     conversation = await Conversation.create({
-      id: `conv-${crypto.randomUUID()}`,
+      id: `conv-${randomUUID()}`,
       participants: [req.user.id, participantId],
       updatedAt: new Date(),
     });

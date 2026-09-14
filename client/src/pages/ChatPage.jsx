@@ -4,8 +4,11 @@ import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../services/api.js';
 
-const defaultSocketUrl = 'https://chatverse-w6fc.onrender.com';
-const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.SOCKET_URL || import.meta.env.VITE_API_URL || import.meta.env.API_URL || defaultSocketUrl;
+const hostname = window.location.hostname;
+const defaultSocketUrl = hostname.includes('vercel.app')
+  ? 'https://chatverse-w6fc.onrender.com'
+  : `${window.location.protocol}//${hostname}:5001`;
+const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || defaultSocketUrl;
 
 function formatTime(value) {
   if (!value) {
@@ -24,34 +27,6 @@ function formatBytes(bytes) {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function formatLastSeen(dateString) {
-  if (!dateString) return 'Offline';
-  const date = new Date(dateString);
-  const now = new Date();
-
-  const diffMs = now - date;
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  const timeString = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
-  if (diffDays === 0) {
-    if (now.getDate() === date.getDate()) {
-      return `Last seen today at ${timeString}`;
-    }
-  }
-
-  if (diffDays === 1 || (diffDays === 0 && now.getDate() !== date.getDate())) {
-    return `Last seen yesterday at ${timeString}`;
-  }
-
-  if (diffDays < 7) {
-    const weekday = date.toLocaleDateString([], { weekday: 'long' });
-    return `Last seen on ${weekday} at ${timeString}`;
-  }
-
-  return `Last seen on ${date.toLocaleDateString()} at ${timeString}`;
 }
 
 const colorAccents = [
@@ -103,14 +78,6 @@ export default function ChatPage() {
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedGroupContacts, setSelectedGroupContacts] = useState([]);
-
-  // Delete Chat modal state
-  const [conversationToDelete, setConversationToDelete] = useState(null);
-
-  // Group settings state
-  const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-  const [groupMemberIds, setGroupMemberIds] = useState([]);
   
   // File uploads and view state
   const [isUploading, setIsUploading] = useState(false);
@@ -118,9 +85,6 @@ export default function ChatPage() {
 
   // Quote replies
   const [replyingToMessage, setReplyingToMessage] = useState(null);
-
-  // Message Actions Dropdown Menu state
-  const [activeMenuMessageId, setActiveMenuMessageId] = useState(null);
 
   // Dark/Light theme state
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem('theme') !== 'light');
@@ -166,37 +130,10 @@ export default function ChatPage() {
     });
   }, [conversations, pinnedConversationIds]);
 
-  const onlineContacts = useMemo(() => {
-    return contacts.filter((contact) => {
-      const isOnline = onlineUsers.includes(contact.id);
-      if (!isOnline) return false;
-
-      const hasConversation = conversations.some((conv) =>
-        !conv.isGroup && conv.participants.some((p) => p.id === contact.id)
-      );
-      return !hasConversation;
-    });
-  }, [contacts, onlineUsers, conversations]);
-
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) || null,
     [activeConversationId, conversations],
   );
-
-  useEffect(() => {
-    setIsGroupSettingsOpen(false);
-    if (activeConversation && activeConversation.isGroup) {
-      setNewGroupName(activeConversation.name || '');
-      setGroupMemberIds(activeConversation.participants.map((p) => p.id));
-    } else {
-      setNewGroupName('');
-      setGroupMemberIds([]);
-    }
-  }, [activeConversation]);
-
-  const pinnedMessages = useMemo(() => {
-    return messages.filter((msg) => msg.isPinned);
-  }, [messages]);
   
   const recipient = useMemo(() => {
     if (!activeConversation || activeConversation.isGroup) {
@@ -218,7 +155,7 @@ export default function ChatPage() {
     try {
       const { data } = await api.get('/api/users');
       setContacts(data);
-    } catch (error) {
+    } catch (_error) {
       setErrorMessage('Unable to refresh contacts.');
     }
   };
@@ -260,7 +197,7 @@ export default function ChatPage() {
         if (conversationData.length > 0) {
           setActiveConversationId(conversationData[0].id);
         }
-      } catch (error) {
+      } catch (_error) {
         setErrorMessage('Unable to refresh chats right now.');
       } finally {
         setLoading(false);
@@ -277,7 +214,7 @@ export default function ChatPage() {
 
     console.log('[ChatPage] socket effect mount', { userId: user?.id });
     const socket = io(socketUrl, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 6,
       reconnectionDelay: 1000,
@@ -306,28 +243,6 @@ export default function ChatPage() {
 
     socket.on('presence_update', (payload) => {
       setOnlineUsers(payload.onlineUserIds || []);
-
-      if (payload.userId && payload.lastSeen) {
-        setConversations((previous) =>
-          previous.map((conv) => {
-            if (!conv.isGroup) {
-              return {
-                ...conv,
-                participants: conv.participants.map((p) =>
-                  p.id === payload.userId ? { ...p, lastSeen: payload.lastSeen } : p
-                ),
-              };
-            }
-            return conv;
-          })
-        );
-        setContacts((previous) =>
-          previous.map((contact) =>
-            contact.id === payload.userId ? { ...contact, lastSeen: payload.lastSeen } : contact
-          )
-        );
-      }
-
       void refreshContacts();
     });
 
@@ -387,53 +302,6 @@ export default function ChatPage() {
       }
     });
 
-    socket.on('message_deleted', ({ messageId, conversationId, deleteType }) => {
-      if (conversationId === activeConversationIdRef.current) {
-        setMessages((previous) => previous.filter((msg) => msg.id !== messageId));
-      }
-      setConversations((previous) =>
-        previous.map((conv) => {
-          if (conv.id === conversationId && conv.lastMessage?.id === messageId) {
-            api.get('/api/conversations')
-              .then(({ data }) => setConversations(data))
-              .catch(() => {});
-          }
-          return conv;
-        })
-      );
-    });
-
-    socket.on('conversation_deleted', ({ conversationId }) => {
-      setConversations((previous) => previous.filter((conv) => conv.id !== conversationId));
-      setPinnedConversationIds((previous) => previous.filter((id) => id !== conversationId));
-      if (activeConversationIdRef.current === conversationId) {
-        setActiveConversationId(null);
-      }
-    });
-
-    socket.on('group_updated', (updatedConv) => {
-      const isParticipant = updatedConv.participants.some((p) => p.id === user?.id);
-
-      if (!isParticipant) {
-        setConversations((previous) => previous.filter((conv) => conv.id !== updatedConv.id));
-        if (activeConversationIdRef.current === updatedConv.id) {
-          setActiveConversationId(null);
-        }
-      } else {
-        setConversations((previous) =>
-          previous.map((conv) => (conv.id === updatedConv.id ? updatedConv : conv))
-        );
-      }
-    });
-
-    socket.on('message_pinned_update', ({ messageId, conversationId, isPinned }) => {
-      if (conversationId === activeConversationIdRef.current) {
-        setMessages((previous) =>
-          previous.map((msg) => (msg.id === messageId ? { ...msg, isPinned } : msg))
-        );
-      }
-    });
-
     return () => {
       console.log('[ChatPage] socket effect cleanup', { userId: user?.id });
       socket.removeAllListeners();
@@ -444,7 +312,6 @@ export default function ChatPage() {
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
     setReplyingToMessage(null);
-    setActiveMenuMessageId(null);
 
     if (!activeConversationId) {
       setMessages([]);
@@ -457,26 +324,13 @@ export default function ChatPage() {
         setMessages(data);
         socketRef.current?.emit('join_conversation', activeConversationId);
         socketRef.current?.emit('mark_read', { conversationId: activeConversationId });
-      } catch (error) {
+      } catch (_error) {
         setErrorMessage('Unable to load that conversation history.');
       }
     };
 
     loadMessages();
   }, [activeConversationId]);
-
-  useEffect(() => {
-    if (!activeMenuMessageId) return;
-
-    const handleOutsideClick = (e) => {
-      if (!e.target.closest('.message-action-menu') && !e.target.closest('.message-action-trigger')) {
-        setActiveMenuMessageId(null);
-      }
-    };
-
-    document.addEventListener('click', handleOutsideClick);
-    return () => document.removeEventListener('click', handleOutsideClick);
-  }, [activeMenuMessageId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -502,7 +356,7 @@ export default function ChatPage() {
       setActiveConversationId(conversation.id);
       setSearch('');
       setErrorMessage('');
-    } catch (error) {
+    } catch (_error) {
       setErrorMessage('Unable to open that conversation.');
     }
   };
@@ -528,83 +382,6 @@ export default function ChatPage() {
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error.response?.data?.message || 'Failed to create group.');
-    }
-  };
-
-  const handleDeleteConversation = async (conversationId) => {
-    try {
-      await api.delete(`/api/conversations/${conversationId}`);
-      setConversations((previous) => previous.filter((conv) => conv.id !== conversationId));
-      setPinnedConversationIds((previous) => previous.filter((id) => id !== conversationId));
-      if (activeConversationId === conversationId) {
-        setActiveConversationId(null);
-      }
-      setConversationToDelete(null);
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to delete conversation.');
-      setConversationToDelete(null);
-    }
-  };
-
-  const handleRenameGroup = async () => {
-    if (!activeConversation || !newGroupName.trim()) return;
-
-    try {
-      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
-        name: newGroupName.trim(),
-      });
-      setConversations((previous) =>
-        previous.map((conv) => (conv.id === data.id ? data : conv))
-      );
-      setErrorMessage('');
-      setIsGroupSettingsOpen(false);
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to rename group.');
-    }
-  };
-
-  const handleAddMember = async (contactId) => {
-    if (!activeConversation) return;
-
-    const updatedIds = [...groupMemberIds, contactId];
-    if (user?.id && !updatedIds.includes(user.id)) {
-      updatedIds.push(user.id);
-    }
-
-    try {
-      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
-        participantIds: updatedIds,
-      });
-      setGroupMemberIds(data.participants.map((p) => p.id));
-      setConversations((previous) =>
-        previous.map((conv) => (conv.id === data.id ? data : conv))
-      );
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to add member.');
-    }
-  };
-
-  const handleRemoveMember = async (contactId) => {
-    if (!activeConversation) return;
-
-    const updatedIds = groupMemberIds.filter((id) => id !== contactId);
-    if (user?.id && !updatedIds.includes(user.id)) {
-      updatedIds.push(user.id);
-    }
-
-    try {
-      const { data } = await api.put(`/api/conversations/${activeConversation.id}`, {
-        participantIds: updatedIds,
-      });
-      setGroupMemberIds(data.participants.map((p) => p.id));
-      setConversations((previous) =>
-        previous.map((conv) => (conv.id === data.id ? data : conv))
-      );
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to remove member.');
     }
   };
 
@@ -720,72 +497,11 @@ export default function ChatPage() {
     const element = document.getElementById(`msg-${quotedMsgId}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Apply a temporary highlight flash effect
       element.classList.add('ring-2', 'ring-cyan-400', 'ring-offset-2', 'transition-all');
       setTimeout(() => {
         element.classList.remove('ring-2', 'ring-cyan-400', 'ring-offset-2');
       }, 1200);
-    }
-  };
-
-  const handlePinMessage = (messageId) => {
-    socketRef.current?.emit('toggle_pin_message', { messageId }, (res) => {
-      if (!res?.success) {
-        setErrorMessage(res?.message || 'Failed to toggle pin on message.');
-      }
-    });
-    setActiveMenuMessageId(null);
-  };
-
-  const handleDeleteMessage = (messageId, deleteType) => {
-    socketRef.current?.emit('delete_message', { messageId, deleteType }, (res) => {
-      if (!res?.success) {
-        setErrorMessage(res?.message || 'Failed to delete message.');
-      }
-    });
-    setActiveMenuMessageId(null);
-  };
-
-  const handleCopyMessage = (text) => {
-    if (!text) return;
-
-    const showCopySuccess = () => {
-      setActiveMenuMessageId(null);
-      setErrorMessage('Message copied to clipboard.');
-      setTimeout(() => {
-        setErrorMessage('');
-      }, 2000);
-    };
-
-    const fallbackCopy = (val) => {
-      try {
-        const textArea = document.createElement('textarea');
-        textArea.value = val;
-        textArea.style.top = '0';
-        textArea.style.left = '0';
-        textArea.style.position = 'fixed';
-        textArea.style.opacity = '0';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        if (successful) {
-          showCopySuccess();
-        } else {
-          setErrorMessage('Unable to copy text.');
-        }
-      } catch (err) {
-        console.error('Fallback copy failed', err);
-        setErrorMessage('Unable to copy text.');
-      }
-    };
-
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text)
-        .then(() => showCopySuccess())
-        .catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
     }
   };
 
@@ -831,12 +547,12 @@ export default function ChatPage() {
         <div className="flex flex-1 overflow-hidden">
           
           {/* Sidebar */}
-          <aside className={`w-full lg:w-[380px] flex flex-col shrink-0 transition-all ${sidebarClass} ${activeConversationId ? 'hidden lg:flex' : 'flex'}`}>
+          <aside className={`w-full lg:w-[380px] flex flex-col shrink-0 transition-colors ${sidebarClass}`}>
             {/* Sidebar Top Header */}
             <div className={`p-5 ${sidebarHeaderClass}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-cyan-400">Chat-Verse</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-cyan-400">Premium Space</p>
                   <h2 className="mt-1 text-2xl font-bold tracking-tight bg-gradient-to-r from-cyan-400 to-cyan-600 bg-clip-text text-transparent">{user?.name}</h2>
                 </div>
                 <div className="flex gap-2">
@@ -860,11 +576,8 @@ export default function ChatPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setErrorMessage('');
-                      setIsGroupModalOpen(true);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-50 hover:text-white transition duration-300"
+                    onClick={() => setIsGroupModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500 hover:text-white transition duration-300"
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -958,40 +671,6 @@ export default function ChatPage() {
 
             {/* Conversations list with sorting */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              
-              {/* Online Now list */}
-              {!search && !loading && onlineContacts.length > 0 && (
-                <div className="mb-6 space-y-2">
-                  <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-2.5">Online Now</p>
-                  {onlineContacts.map((contact) => (
-                    <div
-                      key={contact.id}
-                      onClick={() => handleSelectContact(contact)}
-                      className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition duration-300 relative group/item cursor-pointer ${
-                        darkTheme
-                          ? 'border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10'
-                          : 'border-emerald-500/20 bg-emerald-50/40 hover:bg-emerald-100/40'
-                      }`}
-                    >
-                      <div className="relative">
-                        {contact.avatarUrl ? (
-                          <img src={contact.avatarUrl} alt={contact.name} className="h-11 w-11 rounded-full object-cover border border-emerald-500/20" />
-                        ) : (
-                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/20 font-semibold text-emerald-300 text-sm">
-                            {contact.name.slice(0, 1).toUpperCase()}
-                          </div>
-                        )}
-                        <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-slate-900" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">{contact.name}</p>
-                        <p className="truncate text-xs text-slate-400 mt-1">{contact.status || 'Hey there! I am using Chat-Verse.'}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">Chats</p>
               
               {loading && (
@@ -1022,10 +701,11 @@ export default function ChatPage() {
                 }
 
                 return (
-                  <div
+                  <button
                     key={conversation.id}
+                    type="button"
                     onClick={() => handleSelectConversation(conversation)}
-                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition duration-300 relative group/item cursor-pointer ${
+                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition duration-300 relative group/item ${
                       isActive ? activeConversationClass : hoverUnactiveClass
                     }`}
                   >
@@ -1045,7 +725,7 @@ export default function ChatPage() {
                       )}
                       {isOnline && <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-400 ring-2 ${darkTheme ? 'ring-slate-900' : 'ring-white'}`} />}
                     </div>
-                    <div className="min-w-0 flex-1 pr-14">
+                    <div className="min-w-0 flex-1 pr-6">
                       <div className="flex items-center justify-between">
                         <p className="truncate text-sm font-semibold">
                           {conversation.isGroup ? conversation.name : (participant?.name || 'Private Chat')}
@@ -1057,8 +737,8 @@ export default function ChatPage() {
                       <p className="truncate text-xs text-slate-400 mt-1">{lastMsgText}</p>
                     </div>
 
-                    {/* Chat Action Buttons */}
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    {/* Pin Action Button */}
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                       {isPinned ? (
                         <button
                           type="button"
@@ -1074,7 +754,7 @@ export default function ChatPage() {
                         <button
                           type="button"
                           onClick={(e) => togglePinConversation(e, conversation.id)}
-                          className="opacity-100 lg:opacity-0 lg:group-hover/item:opacity-100 text-slate-400 hover:text-cyan-500 transition duration-200"
+                          className="opacity-0 group-hover/item:opacity-100 text-slate-400 hover:text-cyan-500 transition duration-200"
                           title="Pin Chat"
                         >
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1082,47 +762,20 @@ export default function ChatPage() {
                           </svg>
                         </button>
                       )}
-
-                      {/* Delete Chat Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConversationToDelete(conversation);
-                        }}
-                        className="opacity-100 lg:opacity-0 lg:group-hover/item:opacity-100 text-slate-400 hover:text-rose-500 transition duration-200"
-                        title="Delete Chat"
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </aside>
 
           {/* Active Chat Section */}
-          <main className={`flex flex-1 flex-col bg-slate-950/5 ${activeConversationId ? 'flex' : 'hidden lg:flex'}`}>
+          <main className="flex flex-1 flex-col bg-slate-950/5">
             {activeConversation ? (
               <>
                 {/* Active Chat Header */}
                 <header className={`flex items-center justify-between px-5 py-4 shrink-0 backdrop-blur-md transition-colors ${chatHeaderClass}`}>
-                  <div className="min-w-0 flex items-center gap-2 sm:gap-3">
-                    {/* Back Button on Mobile */}
-                    <button
-                      type="button"
-                      onClick={() => setActiveConversationId(null)}
-                      className="p-1 rounded-full hover:bg-slate-900/10 dark:hover:bg-white/10 lg:hidden text-slate-400 hover:text-cyan-400 transition mr-1"
-                      title="Back to Chats list"
-                    >
-                      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-
+                  <div className="min-w-0 flex items-center gap-3">
                     {/* Avatar display */}
                     {!activeConversation.isGroup && (
                       recipient?.avatarUrl ? (
@@ -1141,30 +794,13 @@ export default function ChatPage() {
                       </div>
                     )}
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-base font-bold truncate">
-                          {activeConversation.isGroup ? activeConversation.name : recipient?.name}
-                        </p>
-                        {activeConversation.isGroup && activeConversation.createdBy === user?.id && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setErrorMessage('');
-                              setIsGroupSettingsOpen(true);
-                            }}
-                            className="rounded-full hover:bg-slate-900/10 dark:hover:bg-white/10 p-1.5 text-slate-400 hover:text-cyan-400 transition shrink-0"
-                            title="Rename & Manage Group"
-                          >
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
+                      <p className="text-base font-bold truncate">
+                        {activeConversation.isGroup ? activeConversation.name : recipient?.name}
+                      </p>
                       <p className="text-xs text-slate-400 mt-0.5 truncate leading-relaxed">
                         {activeConversation.isGroup
                           ? `Group participants: ${groupParticipantsSummary}`
-                          : (onlineUsers.includes(recipient?.id) ? 'Online' : formatLastSeen(recipient?.lastSeen))}
+                          : (recipient?.status || (onlineUsers.includes(recipient?.id) ? 'Available (Online)' : 'Offline'))}
                       </p>
                     </div>
                   </div>
@@ -1180,35 +816,6 @@ export default function ChatPage() {
                 {errorMessage && (
                   <div className="bg-rose-500/10 border-b border-rose-500/20 px-5 py-2.5 text-xs text-rose-400 font-bold">
                     ⚠️ {errorMessage}
-                  </div>
-                )}
-
-                {/* Pinned Messages Banner */}
-                {pinnedMessages.length > 0 && (
-                  <div className={`px-5 py-2.5 flex items-center justify-between border-b transition ${
-                    darkTheme ? 'bg-cyan-950/20 border-cyan-500/10' : 'bg-cyan-50 border-cyan-100'
-                  }`}>
-                    <div
-                      className="flex items-center gap-2 cursor-pointer min-w-0"
-                      onClick={() => handleQuoteClick(pinnedMessages[0].id)}
-                      title="Click to view pinned message"
-                    >
-                      <svg className="h-4 w-4 text-cyan-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v3.586l2.707 2.707A1 1 0 0117 12h-2v5a2 2 0 01-2 2H7a2 2 0 01-2-2v-5H3a1 1 0 01-.707-1.707L5 7.586V4z" />
-                      </svg>
-                      <p className={`text-xs truncate font-semibold ${darkTheme ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                        Pinned: "{pinnedMessages[0].fileUrl ? '📎 Attachment' : pinnedMessages[0].text}"
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handlePinMessage(pinnedMessages[0].id)}
-                      className={`text-[10px] font-bold uppercase tracking-wider transition ${
-                        darkTheme ? 'text-cyan-400 hover:text-cyan-300' : 'text-cyan-600 hover:text-cyan-500'
-                      }`}
-                    >
-                      Unpin
-                    </button>
                   </div>
                 )}
 
@@ -1340,13 +947,8 @@ export default function ChatPage() {
                                 <p className="text-sm leading-6 break-words">{message.text}</p>
                               )}
 
-                              {/* Footer details (time + pin icon + read tick check) */}
+                              {/* Footer details (time + read tick check) */}
                               <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[9px] font-semibold ${isMine ? 'text-cyan-100/90' : 'text-slate-400'}`}>
-                                {message.isPinned && (
-                                  <svg className="h-3 w-3 text-cyan-300 mr-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v3.586l2.707 2.707A1 1 0 0117 12h-2v5a2 2 0 01-2 2H7a2 2 0 01-2-2v-5H3a1 1 0 01-.707-1.707L5 7.586V4z" />
-                                  </svg>
-                                )}
                                 <span>{formatTime(message.createdAt)}</span>
                                 {isMine && (
                                   <svg
@@ -1361,75 +963,19 @@ export default function ChatPage() {
                                 )}
                               </div>
 
-                              {/* Action Buttons overlay: always visible on mobile, hoverable on desktop */}
-                              <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 z-10 transition-opacity duration-200 ${
-                                isMine ? '-left-16' : '-right-16'
-                              } ${activeMenuMessageId === message.id ? 'opacity-100' : 'opacity-100 lg:opacity-0 lg:group-hover/msg:opacity-100'}`}>
-                                <button
-                                  type="button"
-                                  onClick={() => setReplyingToMessage(message)}
-                                  className="p-1 rounded-full bg-slate-900/90 border border-white/10 text-slate-300 hover:text-cyan-400 hover:scale-105 transition message-action-trigger"
-                                  title="Reply"
-                                >
-                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                                  </svg>
-                                </button>
-                                
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveMenuMessageId(activeMenuMessageId === message.id ? null : message.id)}
-                                  className="p-1 rounded-full bg-slate-900/90 border border-white/10 text-slate-300 hover:text-cyan-400 hover:scale-105 transition message-action-trigger"
-                                  title="Actions"
-                                >
-                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                                  </svg>
-                                </button>
-                              </div>
-
-                              {/* Dropdown Menu */}
-                              {activeMenuMessageId === message.id && (
-                                <div className={`message-action-menu absolute top-10 z-20 w-40 rounded-2xl border p-1.5 shadow-2xl backdrop-blur-md transition-all ${
-                                  darkTheme
-                                    ? 'bg-slate-900/95 border-white/10 text-slate-200'
-                                    : 'bg-white/95 border-slate-200 text-slate-800'
-                                } ${isMine ? 'right-0' : 'left-0'}`}>
-                                  {message.text && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCopyMessage(message.text)}
-                                      className="flex w-full items-center px-3 py-2 text-xs font-semibold rounded-xl hover:bg-cyan-500/10 hover:text-cyan-400 transition text-left"
-                                    >
-                                      Copy Text
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePinMessage(message.id)}
-                                    className="flex w-full items-center px-3 py-2 text-xs font-semibold rounded-xl hover:bg-cyan-500/10 hover:text-cyan-400 transition text-left"
-                                  >
-                                    {message.isPinned ? 'Unpin Message' : 'Pin Message'}
-                                  </button>
-                                  <div className="my-1 border-t border-white/5" />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteMessage(message.id, 'me')}
-                                    className="flex w-full items-center px-3 py-2 text-xs font-semibold rounded-xl hover:bg-rose-500/10 hover:text-rose-400 transition text-left"
-                                  >
-                                    Delete for me
-                                  </button>
-                                  {isMine && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteMessage(message.id, 'both')}
-                                      className="flex w-full items-center px-3 py-2 text-xs font-semibold rounded-xl hover:bg-rose-500/10 hover:text-rose-400 transition text-left"
-                                    >
-                                      Delete for everyone
-                                    </button>
-                                  )}
-                                </div>
-                              )}
+                              {/* Reply button overlay on hover */}
+                              <button
+                                type="button"
+                                onClick={() => setReplyingToMessage(message)}
+                                className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover/msg:opacity-100 p-1.5 rounded-full bg-slate-900 border border-white/10 text-slate-300 hover:text-cyan-400 transition-all duration-200 z-10 ${
+                                  isMine ? '-left-10' : '-right-10'
+                                }`}
+                                title="Reply to this message"
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                                </svg>
+                              </button>
 
                             </div>
 
@@ -1556,324 +1102,120 @@ export default function ChatPage() {
           </main>
         </div>
 
-      </div> {/* Close max-w-7xl */}
-
-      {/* Group Modal */}
-      {isGroupModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
-          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up ${
-            darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
-          }`}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Create Group Conversation</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsGroupModalOpen(false);
-                  setGroupName('');
-                  setSelectedGroupContacts([]);
-                  setErrorMessage('');
-                }}
-                className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateGroup} className="space-y-4">
-              {errorMessage && (
-                <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold">
-                  ⚠️ {errorMessage}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Group Name</label>
-                <input
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-cyan-500 ${
-                    darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
-                  }`}
-                  placeholder="Project Alpha, Family group, etc."
-                  required
-                />
+        {/* Group Modal */}
+        {isGroupModalOpen && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
+            <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up ${
+              darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20' : 'bg-white border-slate-200 shadow-slate-300/40'
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">Create Group Conversation</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGroupModalOpen(false);
+                    setGroupName('');
+                    setSelectedGroupContacts([]);
+                  }}
+                  className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Select Members</label>
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                  {contacts.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic">No contacts available to add.</p>
-                  ) : (
-                    contacts.map((contact) => {
-                      const isChecked = selectedGroupContacts.includes(contact.id);
-                      return (
-                        <label
-                          key={contact.id}
-                          className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition ${
-                            isChecked
-                              ? darkTheme
-                                ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200 shadow-md shadow-cyan-950/10'
-                                : 'border-cyan-500/40 bg-cyan-50 text-cyan-800 shadow-md shadow-cyan-100/30'
-                              : darkTheme
-                                ? 'border-white/5 bg-slate-950/40 text-slate-400 hover:bg-slate-800/40'
-                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              if (isChecked) {
-                                setSelectedGroupContacts(selectedGroupContacts.filter((id) => id !== contact.id));
-                              } else {
-                                setSelectedGroupContacts([...selectedGroupContacts, contact.id]);
-                              }
-                            }}
-                            className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4.5 w-4.5"
-                          />
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs">
-                            {contact.name.slice(0, 1).toUpperCase()}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-bold">{contact.name}</p>
-                            <p className="truncate text-[10px] text-slate-400">{contact.email}</p>
-                          </div>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={!groupName.trim() || selectedGroupContacts.length === 0}
-                className="w-full rounded-2xl bg-cyan-500 py-3 text-sm font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/25"
-              >
-                Create Group
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Chat Confirmation Modal */}
-      {conversationToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 animate-fade-in">
-          <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl animate-slide-up ${
-            darkTheme ? 'bg-slate-900 border-white/10 shadow-rose-950/20 text-slate-100' : 'bg-white border-slate-200 shadow-slate-300/40 text-slate-900'
-          }`}>
-            <div className="flex items-center gap-3 text-rose-500 mb-4">
-              <div className="p-2 bg-rose-500/10 rounded-full">
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-bold">Delete Chat</h3>
-            </div>
-            
-            <p className="text-sm text-slate-400 mb-6">
-              Are you sure you want to delete this chat with <span className="font-semibold text-slate-200">{
-                conversationToDelete.isGroup 
-                  ? conversationToDelete.name 
-                  : (conversationToDelete.participants.find(p => p.id !== user?.id)?.name || 'Private Chat')
-              }</span>? This action is permanent and will delete all messages for all participants.
-            </p>
-
-            <div className="flex gap-3 justify-end">
-              <button
-                type="button"
-                onClick={() => setConversationToDelete(null)}
-                className={`px-4 py-2 text-xs font-semibold rounded-full border transition duration-300 ${
-                  darkTheme ? 'border-white/10 bg-slate-800 text-slate-300 hover:bg-slate-700' : 'border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteConversation(conversationToDelete.id)}
-                className="px-4 py-2 text-xs font-semibold rounded-full bg-rose-600 hover:bg-rose-500 text-white transition duration-300"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Photo Lightbox */}
-      {lightboxImageUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-4 animate-fade-in cursor-zoom-out"
-          onClick={() => setLightboxImageUrl(null)}
-        >
-          <button
-            type="button"
-            className="absolute top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition duration-200"
-          >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <img
-            src={lightboxImageUrl}
-            alt="Preview"
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl animate-slide-up"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
-
-      {/* Group Settings Modal (Solid backdrop) */}
-      {isGroupSettingsOpen && activeConversation && activeConversation.isGroup && activeConversation.createdBy === user?.id && (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in ${
-          darkTheme ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
-        }`}>
-          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl animate-slide-up flex flex-col max-h-[90vh] ${
-            darkTheme ? 'bg-slate-900 border-white/10 shadow-cyan-950/20' : 'bg-white border-slate-200 shadow-slate-300/40'
-          }`}>
-            
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/10 shrink-0">
-              <h3 className="text-lg font-bold">Group Settings</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsGroupSettingsOpen(false);
-                  setErrorMessage('');
-                }}
-                className="rounded-full bg-black/10 p-1.5 text-slate-400 hover:text-white transition"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {errorMessage && (
-              <div className="mb-4 p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold shrink-0">
-                ⚠️ {errorMessage}
-              </div>
-            )}
-
-            {/* Scrollable Modal Content */}
-            <div className="flex-1 overflow-y-auto space-y-6 pr-1">
-              
-              {/* Rename Section */}
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rename Group</label>
-                <div className="flex gap-2">
+              <form onSubmit={handleCreateGroup} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Group Name</label>
                   <input
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    className={`flex-1 rounded-2xl border px-4 py-2.5 text-sm outline-none transition focus:border-cyan-500 ${
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-cyan-500 ${
                       darkTheme ? 'border-white/5 bg-slate-950/60 text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
                     }`}
-                    placeholder="Enter group name"
+                    placeholder="Project Alpha, Family group, etc."
+                    required
                   />
-                  <button
-                    type="button"
-                    onClick={handleRenameGroup}
-                    className="px-5 py-2.5 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-bold transition shadow-lg shadow-cyan-500/25 shrink-0"
-                  >
-                    Rename
-                  </button>
-                </div>
-              </div>
-
-              {/* Members List */}
-              <div className="space-y-4">
-                
-                {/* Current Members Section */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Current Members ({activeConversation.participants.length})
-                  </label>
-                  <div className="space-y-2">
-                    {activeConversation.participants.map((member) => {
-                      const isMemberAdmin = member.id === activeConversation.createdBy;
-                      return (
-                        <div
-                          key={member.id}
-                          className={`flex items-center justify-between p-2.5 rounded-2xl border ${
-                            darkTheme ? 'border-white/5 bg-slate-950/20' : 'border-slate-100 bg-slate-50'
-                          }`}
-                        >
-                          <div className="min-w-0 flex items-center gap-2.5">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs shrink-0">
-                              {member.name.slice(0, 1).toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-bold">{member.name}</p>
-                              {isMemberAdmin && <span className="text-[9px] font-semibold text-cyan-400 uppercase tracking-wider">Admin</span>}
-                            </div>
-                          </div>
-
-                          {!isMemberAdmin && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveMember(member.id)}
-                              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold transition shadow-md shadow-rose-600/10"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
 
-                {/* Add New Members Section */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Add New Members
-                  </label>
-                  <div className="space-y-2">
-                    {contacts.filter(c => !groupMemberIds.includes(c.id)).length === 0 ? (
-                      <p className="text-[10px] text-slate-500 italic">All contacts are already in this group.</p>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Select Members</label>
+                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                    {contacts.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">No contacts available to add.</p>
                     ) : (
-                      contacts.filter(c => !groupMemberIds.includes(c.id)).map((contact) => (
-                        <div
-                          key={contact.id}
-                          className={`flex items-center justify-between p-2.5 rounded-2xl border ${
-                            darkTheme ? 'border-white/5 bg-slate-950/20' : 'border-slate-100 bg-slate-50'
-                          }`}
-                        >
-                          <div className="min-w-0 flex items-center gap-2.5">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-500/10 text-slate-400 font-semibold text-xs shrink-0">
+                      contacts.map((contact) => {
+                        const isChecked = selectedGroupContacts.includes(contact.id);
+                        return (
+                          <label
+                            key={contact.id}
+                            className={`flex items-center gap-3 p-3 rounded-2xl border cursor-pointer transition ${
+                              darkTheme ? 'border-white/5 bg-slate-950/40 hover:bg-slate-800/40' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                if (isChecked) {
+                                  setSelectedGroupContacts(selectedGroupContacts.filter((id) => id !== contact.id));
+                                } else {
+                                  setSelectedGroupContacts([...selectedGroupContacts, contact.id]);
+                                }
+                              }}
+                              className="rounded border-white/10 bg-slate-800 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4.5 w-4.5"
+                            />
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 font-semibold text-xs">
                               {contact.name.slice(0, 1).toUpperCase()}
                             </div>
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="truncate text-xs font-bold">{contact.name}</p>
+                              <p className="truncate text-[10px] text-slate-400">{contact.email}</p>
                             </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleAddMember(contact.id)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition shadow-md shadow-emerald-600/10"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      ))
+                          </label>
+                        );
+                      })
                     )}
                   </div>
                 </div>
 
-              </div>
-
+                <button
+                  type="submit"
+                  disabled={!groupName.trim() || selectedGroupContacts.length === 0}
+                  className="w-full rounded-2xl bg-cyan-500 py-3 text-sm font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/25"
+                >
+                  Create Group
+                </button>
+              </form>
             </div>
-
           </div>
-        </div>
-      )}
+        )}
 
+        {/* Photo Lightbox */}
+        {lightboxImageUrl && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-4 animate-fade-in cursor-zoom-out"
+            onClick={() => setLightboxImageUrl(null)}
+          >
+            <button
+              type="button"
+              className="absolute top-6 right-6 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition duration-200"
+            >
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={lightboxImageUrl}
+              alt="Preview"
+              className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl animate-slide-up"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

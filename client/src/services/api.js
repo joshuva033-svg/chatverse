@@ -1,8 +1,11 @@
 import axios from 'axios';
 
-const defaultApiUrl = 'https://chatverse-w6fc.onrender.com';
+const host = window.location.hostname;
+const defaultApiUrl = host.includes('vercel.app')
+  ? 'https://chatverse-w6fc.onrender.com'
+  : `${window.location.protocol}//${host}:5001`;
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || import.meta.env.API_URL || defaultApiUrl,
+  baseURL: import.meta.env.VITE_API_URL || defaultApiUrl,
   withCredentials: true,
 });
 

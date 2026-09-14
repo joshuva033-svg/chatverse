@@ -19,10 +19,6 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ message: 'Password must be at least 6 characters.' });
   }
 
-  if (blockedPattern.test(name) || blockedPattern.test(email)) {
-    return res.status(400).json({ message: 'Test or demo accounts are not allowed.' });
-  }
-
   const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
   if (existingUser) {
     return res.status(409).json({ message: 'An account with that email already exists.' });
@@ -53,11 +49,6 @@ router.post('/login', async (req, res) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
     return res.status(401).json({ message: 'Invalid email or password.' });
-  }
-
-  if (blockedPattern.test(user.name) || blockedPattern.test(user.email)) {
-    await User.deleteOne({ id: user.id });
-    return res.status(403).json({ message: 'This account is not allowed.' });
   }
 
   const token = generateToken(user);
