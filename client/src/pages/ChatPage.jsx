@@ -160,6 +160,10 @@ export default function ChatPage() {
     }
   };
 
+  const onlineContacts = useMemo(() => {
+    return contacts.filter((contact) => contact.id !== user?.id && onlineUsers.includes(contact.id));
+  }, [contacts, onlineUsers, user]);
+
   const filteredContacts = useMemo(() => {
     const lowerSearch = search.toLowerCase();
     const filtered = contacts.filter((contact) => {
@@ -671,6 +675,45 @@ export default function ChatPage() {
 
             {/* Conversations list with sorting */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {/* Online Now Section */}
+              <div className="mb-4 pb-3 border-b border-white/5">
+                <div className="flex items-center justify-between px-1 mb-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Online Now ({onlineContacts.length})
+                  </p>
+                </div>
+                {onlineContacts.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 px-1 italic">No other users online</p>
+                ) : (
+                  <div className="flex items-center gap-3 overflow-x-auto pb-1.5 px-0.5 scrollbar-none">
+                    {onlineContacts.map((contact) => (
+                      <button
+                        key={contact.id}
+                        type="button"
+                        onClick={() => handleSelectContact(contact)}
+                        className="flex flex-col items-center gap-1 shrink-0 group focus:outline-none"
+                        title={`Chat with ${contact.name}`}
+                      >
+                        <div className="relative">
+                          {contact.avatarUrl ? (
+                            <img src={contact.avatarUrl} alt={contact.name} className="h-10 w-10 rounded-full object-cover border-2 border-emerald-500/50 group-hover:scale-105 transition" />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-950 border-2 border-emerald-500/50 text-cyan-300 font-bold text-xs group-hover:scale-105 transition">
+                              {(contact.avatar || contact.name?.slice(0, 1) || 'U').toUpperCase()}
+                            </div>
+                          )}
+                          <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+                        </div>
+                        <span className="text-[11px] font-medium text-slate-300 truncate max-w-[64px] group-hover:text-cyan-400 transition">
+                          {contact.name.split(' ')[0]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">Chats</p>
               
               {loading && (
@@ -681,7 +724,7 @@ export default function ChatPage() {
               )}
               
               {!loading && conversations.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-10">Choose a user from contacts list to start.</p>
+                <p className="text-xs text-slate-400 text-center py-10">Choose a user from online list or search to start.</p>
               )}
 
               {sortedConversations.map((conversation) => {
