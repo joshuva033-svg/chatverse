@@ -29,6 +29,12 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
 const colorAccents = [
   'text-cyan-400',
   'text-rose-400',
@@ -82,6 +88,13 @@ export default function ChatPage() {
   // File uploads and view state
   const [isUploading, setIsUploading] = useState(false);
   const [lightboxImageUrl, setLightboxImageUrl] = useState(null);
+
+  // Voice Note Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerIntervalRef = useRef(null);
 
   // Quote replies
   const [replyingToMessage, setReplyingToMessage] = useState(null);
@@ -471,6 +484,97 @@ export default function ChatPage() {
         fileInputRef.current.value = '';
       }
     }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (_err) {
+      setErrorMessage('Microphone access denied or not supported in this browser.');
+    }
+  };
+
+  const stopAndSendRecording = () => {
+    if (!mediaRecorderRef.current) return;
+
+    const mediaRecorder = mediaRecorderRef.current;
+    mediaRecorder.onstop = async () => {
+      clearInterval(timerIntervalRef.current);
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const file = new File([audioBlob], `voice-note-${Date.now()}.webm`, { type: 'audio/webm' });
+
+      mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+      setIsRecording(false);
+      setRecordingDuration(0);
+
+      setIsUploading(true);
+      setErrorMessage('');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const { data } = await api.post('/api/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+
+        const payload = {
+          conversationId: activeConversationId,
+          recipientId: recipient?.id || null,
+          text: '',
+          fileUrl: data.url,
+          fileName: 'Voice Note.webm',
+          fileType: data.mimeType || 'audio/webm',
+          fileSize: data.size,
+          replyToMessageId: replyingToMessage ? replyingToMessage.id : null,
+        };
+
+        setReplyingToMessage(null);
+        socketRef.current?.emit('send_message', payload, (message) => {
+          if (!message) {
+            setErrorMessage('Unable to send voice note.');
+          }
+        });
+      } catch (_err) {
+        setErrorMessage('Failed to send voice note.');
+      } finally {
+        setIsUploading(false);
+      }
+    };
+
+    mediaRecorder.stop();
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current) {
+      clearInterval(timerIntervalRef.current);
+      mediaRecorderRef.current.onstop = () => {
+        mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+      };
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
   };
 
   const handleTyping = (value) => {
@@ -953,8 +1057,24 @@ export default function ChatPage() {
                                 </p>
                               )}
 
+                              {/* Attachment: Voice Note / Audio */}
+                              {message.fileUrl && (message.fileType?.startsWith('audio/') || message.fileName?.toLowerCase().includes('voice note') || message.fileUrl.match(/\.(webm|mp3|ogg|wav)$/i)) && (
+                                <div className="mb-2 p-2.5 rounded-2xl bg-black/20 border border-white/10 text-left min-w-[220px]">
+                                  <div className="flex items-center gap-2 mb-1.5 px-1">
+                                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+                                      <svg className="h-3.5 w-3.5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                      </svg>
+                                    </div>
+                                    <span className="text-xs font-bold text-emerald-400">Voice Note</span>
+                                    <span className="text-[10px] text-slate-400 ml-auto">{formatBytes(message.fileSize)}</span>
+                                  </div>
+                                  <audio src={message.fileUrl} controls className="w-full h-9 rounded-xl outline-none" />
+                                </div>
+                              )}
+
                               {/* Attachment: Image */}
-                              {message.fileUrl && isImage && (
+                              {message.fileUrl && isImage && !(message.fileType?.startsWith('audio/') || message.fileName?.toLowerCase().includes('voice note') || message.fileUrl.match(/\.(webm|mp3|ogg|wav)$/i)) && (
                                 <div
                                   onClick={() => setLightboxImageUrl(message.fileUrl)}
                                   className="mb-2 relative rounded-2xl overflow-hidden cursor-zoom-in group max-w-full"
@@ -973,7 +1093,7 @@ export default function ChatPage() {
                               )}
 
                               {/* Attachment: Document */}
-                              {message.fileUrl && !isImage && (
+                              {message.fileUrl && !isImage && !(message.fileType?.startsWith('audio/') || message.fileName?.toLowerCase().includes('voice note') || message.fileUrl.match(/\.(webm|mp3|ogg|wav)$/i)) && (
                                 <div className="mb-2 flex items-center gap-3 rounded-2xl bg-black/10 border border-white/5 p-3 text-left">
                                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-400">
                                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1096,7 +1216,7 @@ export default function ChatPage() {
 
                 {/* Input Bar */}
                 <form onSubmit={handleSendMessage} className={`px-5 py-4 shrink-0 transition-colors ${chatFooterClass}`}>
-                  <div className={`flex items-center gap-3 rounded-2xl border px-3 py-2 transition-all duration-300 ${inputAreaClass}`}>
+                  <div className={`flex items-center gap-2 sm:gap-3 rounded-2xl border px-3 py-2 transition-all duration-300 ${inputAreaClass}`}>
                     
                     <input
                       type="file"
@@ -1104,10 +1224,12 @@ export default function ChatPage() {
                       onChange={handleFileChange}
                       className="hidden"
                     />
+                    
+                    {/* File Choosing (Paperclip) Button */}
                     <button
                       type="button"
                       onClick={handleAttachClick}
-                      disabled={isUploading}
+                      disabled={isUploading || isRecording}
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900/10 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition duration-300 disabled:opacity-50"
                       title="Attach Photo or Document"
                     >
@@ -1122,21 +1244,70 @@ export default function ChatPage() {
                       )}
                     </button>
 
-                    <input
-                      value={draft}
-                      onChange={(event) => handleTyping(event.target.value)}
-                      disabled={isUploading}
-                      className="flex-1 bg-transparent text-sm outline-none px-2 py-1.5 disabled:opacity-50"
-                      placeholder={isUploading ? 'Uploading file attachment…' : `Message ${activeConversation.isGroup ? activeConversation.name : recipient?.name}`}
-                    />
-                    
-                    <button
-                      type="submit"
-                      disabled={isUploading || !draft.trim()}
-                      className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/20"
-                    >
-                      Send
-                    </button>
+                    {/* Voice Note Microphone Button (next to file choosing button) */}
+                    {!isRecording && (
+                      <button
+                        type="button"
+                        onClick={startRecording}
+                        disabled={isUploading}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900/10 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition duration-300 disabled:opacity-50"
+                        title="Record Voice Note"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* Live Voice Recording UI Bar */}
+                    {isRecording ? (
+                      <div className="flex-1 flex items-center justify-between px-3 py-1 bg-rose-500/10 border border-rose-500/20 rounded-xl animate-pulse">
+                        <div className="flex items-center gap-2 text-rose-400 font-bold text-xs">
+                          <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping" />
+                          <span>Recording Voice Note... {formatDuration(recordingDuration)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={cancelRecording}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900/50 hover:bg-rose-500/20 text-rose-300 text-xs font-semibold transition"
+                            title="Cancel Recording"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopAndSendRecording}
+                            className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold transition shadow-md shadow-emerald-500/20"
+                            title="Send Voice Note"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Send Note
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          value={draft}
+                          onChange={(event) => handleTyping(event.target.value)}
+                          disabled={isUploading}
+                          className="flex-1 bg-transparent text-sm outline-none px-2 py-1.5 disabled:opacity-50"
+                          placeholder={isUploading ? 'Uploading file attachment…' : `Message ${activeConversation.isGroup ? activeConversation.name : recipient?.name}`}
+                        />
+                        
+                        <button
+                          type="submit"
+                          disabled={isUploading || !draft.trim()}
+                          className="rounded-xl bg-cyan-500 px-4 py-2 text-xs font-bold text-white uppercase tracking-wider transition hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/20"
+                        >
+                          Send
+                        </button>
+                      </>
+                    )}
+
                   </div>
                 </form>
               </>
