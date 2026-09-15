@@ -29,9 +29,7 @@ export default function AuthPage() {
     try {
       if (mode === 'register') {
         await register(name, email, password);
-        setSuccess('Registration successful! Please sign in with your credentials.');
-        setPassword('');
-        setMode('login');
+        navigate('/');
       } else {
         await login(email, password);
         navigate('/');

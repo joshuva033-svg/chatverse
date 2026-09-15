@@ -29,7 +29,9 @@ export function AuthProvider({ children }) {
   }, [token]);
 
   const login = async (email, password) => {
-    const { data } = await api.post('/api/auth/login', { email, password });
+    const cleanEmail = (email || '').toString().trim().toLowerCase();
+    const cleanPassword = (password || '').toString().trim();
+    const { data } = await api.post('/api/auth/login', { email: cleanEmail, password: cleanPassword });
     localStorage.setItem('token', data.token);
     setToken(data.token);
     setUser(data.user);
@@ -37,7 +39,15 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (name, email, password) => {
-    const { data } = await api.post('/api/auth/register', { name, email, password });
+    const cleanName = (name || '').toString().trim();
+    const cleanEmail = (email || '').toString().trim().toLowerCase();
+    const cleanPassword = (password || '').toString().trim();
+    const { data } = await api.post('/api/auth/register', { name: cleanName, email: cleanEmail, password: cleanPassword });
+    if (data.token && data.user) {
+      localStorage.setItem('token', data.token);
+      setToken(data.token);
+      setUser(data.user);
+    }
     return data;
   };
 

@@ -142,13 +142,19 @@ app.post('/api/auth/register', async (req, res) => {
 
   const cleanName = name.toString().trim();
   const cleanEmail = email.toString().trim().toLowerCase();
-  const cleanPassword = password.toString();
+  const cleanPassword = password.toString().trim();
 
   if (cleanPassword.length < 6) {
     return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
   }
 
-  const existingUser = await User.findOne({ email: cleanEmail });
+  const existingUser = await User.findOne({
+    $or: [
+      { email: cleanEmail },
+      { email: new RegExp(`^${cleanEmail.replace(/[-[\]{}()*+?.:=\^$|#\s]/g, '\\$&')}$`, 'i') },
+    ],
+  });
+
   if (existingUser) {
     return res.status(409).json({ message: 'An account with that email already exists.' });
   }
@@ -173,9 +179,15 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const cleanEmail = email.toString().trim().toLowerCase();
-  const cleanPassword = password.toString();
+  const cleanPassword = password.toString().trim();
 
-  const user = await User.findOne({ email: cleanEmail });
+  let user = await User.findOne({ email: cleanEmail });
+  if (!user) {
+    user = await User.findOne({
+      email: new RegExp(`^${cleanEmail.replace(/[-[\]{}()*+?.:=\^$|#\s]/g, '\\$&')}$`, 'i'),
+    });
+  }
+
   if (!user || !bcrypt.compareSync(cleanPassword, user.passwordHash)) {
     return res.status(401).json({ message: 'Invalid email or password.' });
   }
