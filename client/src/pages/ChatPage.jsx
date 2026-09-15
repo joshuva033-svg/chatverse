@@ -197,7 +197,6 @@ function VoiceNotePlayer({ src, fileSize }) {
       <audio
         ref={audioRef}
         src={cleanSrc}
-        crossOrigin="anonymous"
         preload="metadata"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
@@ -655,9 +654,9 @@ export default function ChatPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       let options = {};
       const mimeTypesToTry = [
+        'audio/mp4',
         'audio/webm;codecs=opus',
         'audio/webm',
-        'audio/mp4',
         'audio/aac',
         'audio/ogg',
         'audio/wav',
@@ -703,79 +702,84 @@ export default function ChatPage() {
     const mediaRecorder = mediaRecorderRef.current;
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
 
-    const mimeType = mediaRecorder.mimeType || 'audio/webm';
-    let ext = 'webm';
-    if (mimeType.includes('mp4') || mimeType.includes('m4a')) ext = 'm4a';
+    const mimeType = mediaRecorder.mimeType || 'audio/mp4';
+    let ext = 'm4a';
+    if (mimeType.includes('webm')) ext = 'webm';
     else if (mimeType.includes('aac')) ext = 'aac';
     else if (mimeType.includes('ogg')) ext = 'ogg';
     else if (mimeType.includes('wav')) ext = 'wav';
     else if (mimeType.includes('mp3')) ext = 'mp3';
 
+    mediaRecorder.addEventListener(
+      'stop',
+      async () => {
+        clearInterval(timerIntervalRef.current);
+        if (mediaRecorder.stream) {
+          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        }
+        setIsRecording(false);
+        setRecordingDuration(0);
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        if (!audioChunksRef.current || audioChunksRef.current.length === 0) {
+          setErrorMessage('Voice note was empty. Please try recording again.');
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (audioBlob.size === 0) {
+          setErrorMessage('Voice note was empty. Please try recording again.');
+          return;
+        }
+
+        const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
+
+        setIsUploading(true);
+        setErrorMessage('');
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          const { data } = await api.post('/api/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+
+          const targetRecipientId =
+            recipient?.id || activeConversation?.participants?.find((p) => p.id !== user?.id)?.id || null;
+
+          const payload = {
+            conversationId: activeConversationId,
+            recipientId: targetRecipientId,
+            text: '',
+            fileUrl: data.url,
+            fileName: `Voice Note.${ext}`,
+            fileType: data.mimeType || mimeType,
+            fileSize: data.size,
+            replyToMessageId: replyingToMessage ? replyingToMessage.id : null,
+          };
+
+          setReplyingToMessage(null);
+          socketRef.current?.emit('send_message', payload, (message) => {
+            if (!message) {
+              setErrorMessage('Unable to send voice note.');
+            }
+          });
+        } catch (err) {
+          console.error('Voice note upload failed:', err);
+          setErrorMessage(err.response?.data?.message || 'Failed to send voice note.');
+        } finally {
+          setIsUploading(false);
+        }
+      },
+      { once: true },
+    );
+
     try {
       if (mediaRecorder.state === 'recording') {
-        mediaRecorder.requestData();
+        mediaRecorder.stop();
       }
     } catch (_e) {}
-
-    mediaRecorder.onstop = async () => {
-      clearInterval(timerIntervalRef.current);
-      if (mediaRecorder.stream) {
-        mediaRecorder.stream.getTracks().forEach((track) => track.stop());
-      }
-      setIsRecording(false);
-      setRecordingDuration(0);
-
-      if (!audioChunksRef.current || audioChunksRef.current.length === 0) {
-        setErrorMessage('Voice note was empty. Please try recording again.');
-        return;
-      }
-
-      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-      if (audioBlob.size === 0) {
-        setErrorMessage('Voice note was empty. Please try recording again.');
-        return;
-      }
-
-      const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
-
-      setIsUploading(true);
-      setErrorMessage('');
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const { data } = await api.post('/api/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-
-        const targetRecipientId = recipient?.id || activeConversation?.participants?.find((p) => p.id !== user?.id)?.id || null;
-
-        const payload = {
-          conversationId: activeConversationId,
-          recipientId: targetRecipientId,
-          text: '',
-          fileUrl: data.url,
-          fileName: `Voice Note.${ext}`,
-          fileType: data.mimeType || mimeType,
-          fileSize: data.size,
-          replyToMessageId: replyingToMessage ? replyingToMessage.id : null,
-        };
-
-        setReplyingToMessage(null);
-        socketRef.current?.emit('send_message', payload, (message) => {
-          if (!message) {
-            setErrorMessage('Unable to send voice note.');
-          }
-        });
-      } catch (err) {
-        console.error('Voice note upload failed:', err);
-        setErrorMessage(err.response?.data?.message || 'Failed to send voice note.');
-      } finally {
-        setIsUploading(false);
-      }
-    };
-
-    mediaRecorder.stop();
   };
 
   const cancelRecording = () => {
