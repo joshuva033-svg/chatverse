@@ -72,6 +72,13 @@ function VoiceNotePlayer({ src, fileSize }) {
     return src;
   }, [src]);
 
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = 1.0;
+      audioRef.current.muted = false;
+    }
+  }, [cleanSrc]);
+
   const togglePlay = () => {
     if (!audioRef.current) return;
     setHasError(false);
@@ -651,12 +658,19 @@ export default function ChatPage() {
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
       let options = {};
       const mimeTypesToTry = [
-        'audio/mp4',
         'audio/webm;codecs=opus',
         'audio/webm',
+        'audio/mp4',
         'audio/aac',
         'audio/ogg',
         'audio/wav',
@@ -702,9 +716,9 @@ export default function ChatPage() {
     const mediaRecorder = mediaRecorderRef.current;
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
 
-    const mimeType = mediaRecorder.mimeType || 'audio/mp4';
-    let ext = 'm4a';
-    if (mimeType.includes('webm')) ext = 'webm';
+    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+    let ext = 'webm';
+    if (mimeType.includes('mp4') || mimeType.includes('m4a')) ext = 'm4a';
     else if (mimeType.includes('aac')) ext = 'aac';
     else if (mimeType.includes('ogg')) ext = 'ogg';
     else if (mimeType.includes('wav')) ext = 'wav';
@@ -714,26 +728,33 @@ export default function ChatPage() {
       'stop',
       async () => {
         clearInterval(timerIntervalRef.current);
-        if (mediaRecorder.stream) {
-          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
-        }
         setIsRecording(false);
         setRecordingDuration(0);
 
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 100));
 
         if (!audioChunksRef.current || audioChunksRef.current.length === 0) {
+          if (mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+          }
           setErrorMessage('Voice note was empty. Please try recording again.');
           return;
         }
 
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         if (audioBlob.size === 0) {
+          if (mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+          }
           setErrorMessage('Voice note was empty. Please try recording again.');
           return;
         }
 
         const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
+
+        if (mediaRecorder.stream) {
+          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        }
 
         setIsUploading(true);
         setErrorMessage('');
