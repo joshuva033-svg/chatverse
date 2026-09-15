@@ -103,13 +103,25 @@ function VoiceNotePlayer({ src, fileSize }) {
   };
 
   const handleLoadedMetadata = () => {
-    if (audioRef.current && isFinite(audioRef.current.duration)) {
-      setDuration(audioRef.current.duration);
+    if (!audioRef.current) return;
+    const aud = audioRef.current;
+    if (aud.duration === Infinity || isNaN(aud.duration) || aud.duration > 300) {
+      aud.currentTime = 1e101;
+      const fixDuration = () => {
+        aud.currentTime = 0;
+        if (isFinite(aud.duration)) {
+          setDuration(aud.duration);
+        }
+        aud.removeEventListener('timeupdate', fixDuration);
+      };
+      aud.addEventListener('timeupdate', fixDuration);
+    } else if (isFinite(aud.duration)) {
+      setDuration(aud.duration);
     }
   };
 
   const handleDurationChange = () => {
-    if (audioRef.current && isFinite(audioRef.current.duration)) {
+    if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration <= 300) {
       setDuration(audioRef.current.duration);
     }
   };
