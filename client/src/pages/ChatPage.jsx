@@ -56,6 +56,102 @@ function getUserColor(userId) {
   return colorAccents[index];
 }
 
+function VoiceNotePlayer({ src, fileSize }) {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch((err) => console.error('Playback error:', err));
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration || 0);
+    }
+  };
+
+  const handleSeek = (e) => {
+    const time = parseFloat(e.target.value);
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  };
+
+  return (
+    <div className="mb-2 p-3 rounded-2xl bg-slate-900/80 border border-emerald-500/30 text-left min-w-[240px] max-w-[300px] shadow-lg">
+      <div className="flex items-center gap-2 mb-2 px-0.5">
+        <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+        <span className="text-xs font-bold text-emerald-400">Voice Note</span>
+        <span className="text-[10px] text-slate-400 ml-auto">{formatBytes(fileSize)}</span>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md shadow-emerald-500/20 transition transform active:scale-95"
+          title={isPlaying ? 'Pause' : 'Play'}
+        >
+          {isPlaying ? (
+            <svg className="h-4 w-4 fill-current text-slate-950" viewBox="0 0 24 24">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+            </svg>
+          ) : (
+            <svg className="h-4 w-4 fill-current text-slate-950 translate-x-0.5" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <input
+            type="range"
+            min="0"
+            max={duration || 100}
+            step="0.1"
+            value={currentTime}
+            onChange={handleSeek}
+            className="w-full h-1.5 bg-slate-700 accent-emerald-400 rounded-lg cursor-pointer"
+          />
+          <div className="flex justify-between items-center text-[10px] font-semibold text-slate-300 mt-1">
+            <span>{formatDuration(Math.floor(currentTime))}</span>
+            <span>{duration ? formatDuration(Math.floor(duration)) : '0:00'}</span>
+          </div>
+        </div>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+        preload="metadata"
+        className="hidden"
+      />
+    </div>
+  );
+}
+
 const activeConversationClass = 'border-cyan-500/35 bg-cyan-500/10 shadow-lg shadow-cyan-950/5';
 const hoverUnactiveClass = 'border-white/5 bg-slate-900/10 hover:border-cyan-500/30 hover:bg-cyan-500/5';
 
@@ -489,7 +585,20 @@ export default function ChatPage() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      let options = {};
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          options = { mimeType: 'audio/webm;codecs=opus' };
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options = { mimeType: 'audio/mp4' };
+        } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+          options = { mimeType: 'audio/aac' };
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          options = { mimeType: 'audio/ogg' };
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -499,7 +608,7 @@ export default function ChatPage() {
         }
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(100);
       setIsRecording(true);
       setRecordingDuration(0);
 
@@ -519,10 +628,13 @@ export default function ChatPage() {
     if (!mediaRecorderRef.current) return;
 
     const mediaRecorder = mediaRecorderRef.current;
+    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+    const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('aac') ? 'aac' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+
     mediaRecorder.onstop = async () => {
       clearInterval(timerIntervalRef.current);
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      const file = new File([audioBlob], `voice-note-${Date.now()}.webm`, { type: 'audio/webm' });
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
 
       mediaRecorder.stream.getTracks().forEach((track) => track.stop());
       setIsRecording(false);
@@ -543,8 +655,8 @@ export default function ChatPage() {
           recipientId: recipient?.id || null,
           text: '',
           fileUrl: data.url,
-          fileName: 'Voice Note.webm',
-          fileType: data.mimeType || 'audio/webm',
+          fileName: `Voice Note.${ext}`,
+          fileType: data.mimeType || mimeType,
           fileSize: data.size,
           replyToMessageId: replyingToMessage ? replyingToMessage.id : null,
         };
@@ -1058,19 +1170,8 @@ export default function ChatPage() {
                               )}
 
                               {/* Attachment: Voice Note / Audio */}
-                              {message.fileUrl && (message.fileType?.startsWith('audio/') || message.fileName?.toLowerCase().includes('voice note') || message.fileUrl.match(/\.(webm|mp3|ogg|wav)$/i)) && (
-                                <div className="mb-2 p-2.5 rounded-2xl bg-black/20 border border-white/10 text-left min-w-[220px]">
-                                  <div className="flex items-center gap-2 mb-1.5 px-1">
-                                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-                                      <svg className="h-3.5 w-3.5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                                      </svg>
-                                    </div>
-                                    <span className="text-xs font-bold text-emerald-400">Voice Note</span>
-                                    <span className="text-[10px] text-slate-400 ml-auto">{formatBytes(message.fileSize)}</span>
-                                  </div>
-                                  <audio src={message.fileUrl} controls className="w-full h-9 rounded-xl outline-none" />
-                                </div>
+                              {message.fileUrl && (message.fileType?.startsWith('audio/') || message.fileName?.toLowerCase().includes('voice note') || message.fileUrl.match(/\.(webm|m4a|aac|mp3|ogg|wav)$/i)) && (
+                                <VoiceNotePlayer src={message.fileUrl} fileSize={message.fileSize} />
                               )}
 
                               {/* Attachment: Image */}
