@@ -14,11 +14,17 @@ export async function connectDb() {
 
   if (uri) {
     try {
-      await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
-      console.log('Connected to MongoDB Atlas / Remote URI successfully.');
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 10000,
+      });
+      console.log('✅ Connected to MongoDB Atlas cloud database successfully.');
       return mongoose.connection;
     } catch (error) {
-      console.warn('Could not connect to process.env.MONGODB_URI, falling back to persistent local database:', error.message);
+      console.error('❌ MONGODB_URI connection failed:', error.message);
+      if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+        console.error('⚠️ WARNING: Running on production/Render without a valid MONGODB_URI. User data will reset when Render sleeps unless a valid MONGODB_URI is provided in Render dashboard!');
+      }
     }
   }
 
