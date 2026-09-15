@@ -86,6 +86,9 @@ function VoiceNotePlayer({ src, fileSize }) {
     if (isPlaying) {
       audioRef.current.pause();
     } else {
+      if (audioRef.current.ended || (audioRef.current.duration && audioRef.current.currentTime >= audioRef.current.duration)) {
+        audioRef.current.currentTime = 0;
+      }
       const playPromise = audioRef.current.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
@@ -697,7 +700,7 @@ export default function ChatPage() {
         }
       };
 
-      mediaRecorder.start(100);
+      mediaRecorder.start();
       setIsRecording(true);
       setRecordingDuration(0);
 
