@@ -13,21 +13,23 @@ export async function connectDb() {
   const uri = process.env.MONGODB_URI;
 
   if (uri) {
+    console.log('Connecting to process.env.MONGODB_URI database...');
     try {
       await mongoose.connect(uri, {
-        serverSelectionTimeoutMS: 5000,
-        connectTimeoutMS: 10000,
+        serverSelectionTimeoutMS: 30000,
+        connectTimeoutMS: 30000,
+        retryWrites: true,
       });
-      console.log('✅ Connected to MongoDB Atlas cloud database successfully.');
+      console.log('✅ Connected to MongoDB Atlas / Remote URI database successfully.');
       return mongoose.connection;
     } catch (error) {
-      console.error('❌ MONGODB_URI connection failed:', error.message);
-      if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
-        console.error('⚠️ WARNING: Running on production/Render without a valid MONGODB_URI. User data will reset when Render sleeps unless a valid MONGODB_URI is provided in Render dashboard!');
-      }
+      console.error('❌ Fatal: Failed to connect to process.env.MONGODB_URI:', error.message);
+      throw error;
     }
   }
 
+  // Only fall back to local MongoMemoryServer if NO MONGODB_URI environment variable is configured
+  console.log('No MONGODB_URI provided. Initializing local persistent database...');
   const dbPath = path.resolve(process.cwd(), 'data');
   if (!fs.existsSync(dbPath)) {
     fs.mkdirSync(dbPath, { recursive: true });
@@ -42,7 +44,7 @@ export async function connectDb() {
 
   const memoryUri = mongoServer.getUri();
   await mongoose.connect(memoryUri);
-  console.log('Connected to persistent local database at:', dbPath);
+  console.log('Connected to local persistent database at:', dbPath);
   return mongoose.connection;
 }
 
