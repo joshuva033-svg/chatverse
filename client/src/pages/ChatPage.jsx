@@ -61,6 +61,7 @@ function VoiceNotePlayer({ src, fileSize }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [hasError, setHasError] = useState(false);
 
   const cleanSrc = useMemo(() => {
@@ -90,13 +91,19 @@ function VoiceNotePlayer({ src, fileSize }) {
 
   const handleTimeUpdate = () => {
     if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
+      setCurrentTime(audioRef.current.currentTime || 0);
     }
   };
 
   const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration || 0);
+    if (audioRef.current && isFinite(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
+    }
+  };
+
+  const handleDurationChange = () => {
+    if (audioRef.current && isFinite(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
     }
   };
 
@@ -108,12 +115,22 @@ function VoiceNotePlayer({ src, fileSize }) {
     }
   };
 
+  const toggleSpeed = () => {
+    const speeds = [1, 1.5, 2];
+    const currentIndex = speeds.indexOf(playbackSpeed);
+    const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
+    setPlaybackSpeed(nextSpeed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextSpeed;
+    }
+  };
+
   return (
     <div className="mb-2 p-3 rounded-2xl bg-slate-900/90 border border-emerald-500/30 text-left min-w-[240px] max-w-[320px] shadow-lg">
       <div className="flex items-center gap-2 mb-2 px-0.5">
         <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
         <span className="text-xs font-bold text-emerald-400">Voice Note</span>
-        <span className="text-[10px] text-slate-400 ml-auto">{formatBytes(fileSize)}</span>
+        {fileSize && <span className="text-[10px] text-slate-400 ml-auto">{formatBytes(fileSize)}</span>}
       </div>
 
       <div className="flex items-center gap-3">
@@ -138,7 +155,7 @@ function VoiceNotePlayer({ src, fileSize }) {
           <input
             type="range"
             min="0"
-            max={duration || 100}
+            max={duration && isFinite(duration) ? duration : 100}
             step="0.1"
             value={currentTime}
             onChange={handleSeek}
@@ -146,30 +163,45 @@ function VoiceNotePlayer({ src, fileSize }) {
           />
           <div className="flex justify-between items-center text-[10px] font-semibold text-slate-300 mt-1">
             <span>{formatDuration(Math.floor(currentTime))}</span>
-            <span>{duration ? formatDuration(Math.floor(duration)) : '0:00'}</span>
+            <span>{duration && isFinite(duration) ? formatDuration(Math.floor(duration)) : '0:00'}</span>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={toggleSpeed}
+          className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-emerald-400 border border-emerald-500/20 hover:bg-slate-700 transition"
+          title="Playback Speed"
+        >
+          {playbackSpeed}x
+        </button>
       </div>
 
       {hasError && (
-        <div className="mt-2 flex items-center justify-between text-[11px] text-rose-400 font-medium">
-          <span>Unable to play in player</span>
-          <a
-            href={cleanSrc}
-            target="_blank"
-            rel="noreferrer"
-            className="underline font-bold hover:text-white"
-          >
-            Open Audio ↗
-          </a>
+        <div className="mt-2 text-[11px] text-rose-400 font-medium space-y-1">
+          <div className="flex items-center justify-between">
+            <span>Unable to play in custom player</span>
+            <a
+              href={cleanSrc}
+              target="_blank"
+              rel="noreferrer"
+              className="underline font-bold hover:text-white"
+            >
+              Open Audio ↗
+            </a>
+          </div>
+          <audio controls src={cleanSrc} className="w-full h-8 mt-1 rounded" />
         </div>
       )}
 
       <audio
         ref={audioRef}
         src={cleanSrc}
+        crossOrigin="anonymous"
+        preload="metadata"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onDurationChange={handleDurationChange}
         onError={() => setHasError(true)}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
@@ -177,7 +209,6 @@ function VoiceNotePlayer({ src, fileSize }) {
           setIsPlaying(false);
           setCurrentTime(0);
         }}
-        preload="auto"
         className="hidden"
       />
     </div>
@@ -616,17 +647,28 @@ export default function ChatPage() {
 
   const startRecording = async () => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setErrorMessage('Audio recording is not supported in this browser.');
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       let options = {};
-      if (typeof MediaRecorder !== 'undefined') {
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          options = { mimeType: 'audio/webm;codecs=opus' };
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options = { mimeType: 'audio/mp4' };
-        } else if (MediaRecorder.isTypeSupported('audio/aac')) {
-          options = { mimeType: 'audio/aac' };
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          options = { mimeType: 'audio/ogg' };
+      const mimeTypesToTry = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/aac',
+        'audio/ogg',
+        'audio/wav',
+      ];
+
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+        for (const type of mimeTypesToTry) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            options = { mimeType: type };
+            break;
+          }
         }
       }
 
@@ -635,7 +677,7 @@ export default function ChatPage() {
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
@@ -651,26 +693,50 @@ export default function ChatPage() {
       timerIntervalRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
-    } catch (_err) {
+    } catch (err) {
+      console.error('Microphone access error:', err);
       setErrorMessage('Microphone access denied or not supported in this browser.');
     }
   };
 
   const stopAndSendRecording = () => {
-    if (!mediaRecorderRef.current) return;
-
     const mediaRecorder = mediaRecorderRef.current;
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+
     const mimeType = mediaRecorder.mimeType || 'audio/webm';
-    const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('aac') ? 'aac' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+    let ext = 'webm';
+    if (mimeType.includes('mp4') || mimeType.includes('m4a')) ext = 'm4a';
+    else if (mimeType.includes('aac')) ext = 'aac';
+    else if (mimeType.includes('ogg')) ext = 'ogg';
+    else if (mimeType.includes('wav')) ext = 'wav';
+    else if (mimeType.includes('mp3')) ext = 'mp3';
+
+    try {
+      if (mediaRecorder.state === 'recording') {
+        mediaRecorder.requestData();
+      }
+    } catch (_e) {}
 
     mediaRecorder.onstop = async () => {
       clearInterval(timerIntervalRef.current);
-      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-      const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
-
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+      if (mediaRecorder.stream) {
+        mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+      }
       setIsRecording(false);
       setRecordingDuration(0);
+
+      if (!audioChunksRef.current || audioChunksRef.current.length === 0) {
+        setErrorMessage('Voice note was empty. Please try recording again.');
+        return;
+      }
+
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+      if (audioBlob.size === 0) {
+        setErrorMessage('Voice note was empty. Please try recording again.');
+        return;
+      }
+
+      const file = new File([audioBlob], `voice-note-${Date.now()}.${ext}`, { type: mimeType });
 
       setIsUploading(true);
       setErrorMessage('');
@@ -682,9 +748,11 @@ export default function ChatPage() {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 
+        const targetRecipientId = recipient?.id || activeConversation?.participants?.find((p) => p.id !== user?.id)?.id || null;
+
         const payload = {
           conversationId: activeConversationId,
-          recipientId: recipient?.id || null,
+          recipientId: targetRecipientId,
           text: '',
           fileUrl: data.url,
           fileName: `Voice Note.${ext}`,
@@ -699,8 +767,9 @@ export default function ChatPage() {
             setErrorMessage('Unable to send voice note.');
           }
         });
-      } catch (_err) {
-        setErrorMessage('Failed to send voice note.');
+      } catch (err) {
+        console.error('Voice note upload failed:', err);
+        setErrorMessage(err.response?.data?.message || 'Failed to send voice note.');
       } finally {
         setIsUploading(false);
       }
@@ -710,12 +779,15 @@ export default function ChatPage() {
   };
 
   const cancelRecording = () => {
-    if (mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       clearInterval(timerIntervalRef.current);
-      mediaRecorderRef.current.onstop = () => {
-        mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+      const mediaRecorder = mediaRecorderRef.current;
+      mediaRecorder.onstop = () => {
+        if (mediaRecorder.stream) {
+          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        }
       };
-      mediaRecorderRef.current.stop();
+      mediaRecorder.stop();
     }
     setIsRecording(false);
     setRecordingDuration(0);

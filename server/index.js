@@ -52,9 +52,12 @@ app.use(
   '/uploads',
   express.static(path.resolve(process.cwd(), 'uploads'), {
     setHeaders: (res, filePath) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
       res.setHeader('Accept-Ranges', 'bytes');
       if (filePath.endsWith('.webm')) res.setHeader('Content-Type', 'audio/webm');
-      if (filePath.endsWith('.m4a')) res.setHeader('Content-Type', 'audio/mp4');
+      if (filePath.endsWith('.m4a') || filePath.endsWith('.mp4')) res.setHeader('Content-Type', 'audio/mp4');
       if (filePath.endsWith('.aac')) res.setHeader('Content-Type', 'audio/aac');
       if (filePath.endsWith('.mp3')) res.setHeader('Content-Type', 'audio/mpeg');
       if (filePath.endsWith('.ogg')) res.setHeader('Content-Type', 'audio/ogg');
@@ -429,7 +432,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (!conversation.isGroup && !recipientId) {
+    let finalRecipientId = recipientId;
+    if (!conversation.isGroup && !finalRecipientId) {
+      finalRecipientId = conversation.participants.find((pId) => pId !== socket.userId) || null;
+    }
+
+    if (!conversation.isGroup && !finalRecipientId) {
       callback?.(null);
       return;
     }
