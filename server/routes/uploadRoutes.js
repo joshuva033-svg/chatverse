@@ -29,7 +29,11 @@ router.post('/', upload.single('file'), (req, res) => {
     return res.status(400).json({ message: 'File upload failed.' });
   }
 
-  const url = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  const rawProtocol = req.get('x-forwarded-proto') || (req.secure ? 'https' : req.protocol) || 'http';
+  const host = req.get('host') || '';
+  const protocol = host.includes('onrender.com') || host.includes('vercel.app') ? 'https' : rawProtocol;
+
+  const url = `${protocol}://${host}/uploads/${req.file.filename}`;
   res.json({
     url,
     filename: req.file.originalname,

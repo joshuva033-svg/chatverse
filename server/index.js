@@ -17,6 +17,8 @@ import uploadRoutes from './routes/uploadRoutes.js';
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
+
 const JWT_SECRET = process.env.JWT_SECRET || 'chat-verse-dev-secret';
 const PORT = Number(process.env.PORT) || 5001;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
@@ -46,7 +48,20 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json());
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+app.use(
+  '/uploads',
+  express.static(path.resolve(process.cwd(), 'uploads'), {
+    setHeaders: (res, filePath) => {
+      res.setHeader('Accept-Ranges', 'bytes');
+      if (filePath.endsWith('.webm')) res.setHeader('Content-Type', 'audio/webm');
+      if (filePath.endsWith('.m4a')) res.setHeader('Content-Type', 'audio/mp4');
+      if (filePath.endsWith('.aac')) res.setHeader('Content-Type', 'audio/aac');
+      if (filePath.endsWith('.mp3')) res.setHeader('Content-Type', 'audio/mpeg');
+      if (filePath.endsWith('.ogg')) res.setHeader('Content-Type', 'audio/ogg');
+      if (filePath.endsWith('.wav')) res.setHeader('Content-Type', 'audio/wav');
+    },
+  }),
+);
 app.use('/api/upload', uploadRoutes);
 
 const socketUsers = new Map();

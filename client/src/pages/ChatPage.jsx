@@ -61,13 +61,30 @@ function VoiceNotePlayer({ src, fileSize }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [hasError, setHasError] = useState(false);
+
+  const cleanSrc = useMemo(() => {
+    if (!src) return '';
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && src.startsWith('http://')) {
+      return src.replace('http://', 'https://');
+    }
+    return src;
+  }, [src]);
 
   const togglePlay = () => {
     if (!audioRef.current) return;
+    setHasError(false);
+
     if (isPlaying) {
       audioRef.current.pause();
     } else {
-      audioRef.current.play().catch((err) => console.error('Playback error:', err));
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.error('Audio playback failed:', err);
+          setHasError(true);
+        });
+      }
     }
   };
 
@@ -92,7 +109,7 @@ function VoiceNotePlayer({ src, fileSize }) {
   };
 
   return (
-    <div className="mb-2 p-3 rounded-2xl bg-slate-900/80 border border-emerald-500/30 text-left min-w-[240px] max-w-[300px] shadow-lg">
+    <div className="mb-2 p-3 rounded-2xl bg-slate-900/90 border border-emerald-500/30 text-left min-w-[240px] max-w-[320px] shadow-lg">
       <div className="flex items-center gap-2 mb-2 px-0.5">
         <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
         <span className="text-xs font-bold text-emerald-400">Voice Note</span>
@@ -103,15 +120,15 @@ function VoiceNotePlayer({ src, fileSize }) {
         <button
           type="button"
           onClick={togglePlay}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md shadow-emerald-500/20 transition transform active:scale-95"
-          title={isPlaying ? 'Pause' : 'Play'}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-md shadow-emerald-500/20 transition transform active:scale-95 cursor-pointer"
+          title={isPlaying ? 'Pause Voice Note' : 'Play Voice Note'}
         >
           {isPlaying ? (
-            <svg className="h-4 w-4 fill-current text-slate-950" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 fill-current text-slate-950" viewBox="0 0 24 24">
               <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
             </svg>
           ) : (
-            <svg className="h-4 w-4 fill-current text-slate-950 translate-x-0.5" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 fill-current text-slate-950 translate-x-0.5" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
           )}
@@ -134,18 +151,33 @@ function VoiceNotePlayer({ src, fileSize }) {
         </div>
       </div>
 
+      {hasError && (
+        <div className="mt-2 flex items-center justify-between text-[11px] text-rose-400 font-medium">
+          <span>Unable to play in player</span>
+          <a
+            href={cleanSrc}
+            target="_blank"
+            rel="noreferrer"
+            className="underline font-bold hover:text-white"
+          >
+            Open Audio ↗
+          </a>
+        </div>
+      )}
+
       <audio
         ref={audioRef}
-        src={src}
+        src={cleanSrc}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onError={() => setHasError(true)}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => {
           setIsPlaying(false);
           setCurrentTime(0);
         }}
-        preload="metadata"
+        preload="auto"
         className="hidden"
       />
     </div>
