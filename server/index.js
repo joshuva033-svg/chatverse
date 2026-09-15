@@ -122,22 +122,28 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ message: 'Please provide name, email, and password.' });
   }
 
+  const cleanName = name.toString().trim();
+  const cleanEmail = email.toString().trim().toLowerCase();
+  const cleanPassword = password.toString();
 
+  if (cleanPassword.length < 6) {
+    return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+  }
 
-  const existingUser = await User.findOne({ email });
+  const existingUser = await User.findOne({ email: cleanEmail });
   if (existingUser) {
     return res.status(409).json({ message: 'An account with that email already exists.' });
   }
 
   const user = await User.create({
     id: `user-${randomUUID()}`,
-    name,
-    email,
-    passwordHash: bcrypt.hashSync(password, 10),
-    avatar: (name || 'U').charAt(0).toUpperCase(),
+    name: cleanName,
+    email: cleanEmail,
+    passwordHash: bcrypt.hashSync(cleanPassword, 10),
+    avatar: (cleanName || 'U').charAt(0).toUpperCase(),
   });
 
-  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '365d' });
   res.json({ user: serializeUser(user), token });
 });
 
@@ -148,14 +154,15 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ message: 'Please provide your email and password.' });
   }
 
-  const user = await User.findOne({ email });
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
+  const cleanEmail = email.toString().trim().toLowerCase();
+  const cleanPassword = password.toString();
+
+  const user = await User.findOne({ email: cleanEmail });
+  if (!user || !bcrypt.compareSync(cleanPassword, user.passwordHash)) {
     return res.status(401).json({ message: 'Invalid email or password.' });
   }
 
-
-
-  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '365d' });
   res.json({ user: serializeUser(user), token });
 });
 
