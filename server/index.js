@@ -13,6 +13,7 @@ import Conversation from './models/Conversation.js';
 import Message from './models/Message.js';
 import path from 'node:path';
 import uploadRoutes from './routes/uploadRoutes.js';
+import statusRoutes from './routes/statusRoutes.js';
 
 dotenv.config();
 
@@ -66,6 +67,7 @@ app.use(
   }),
 );
 app.use('/api/upload', uploadRoutes);
+app.use('/api/status', authMiddleware, statusRoutes);
 
 const socketUsers = new Map();
 

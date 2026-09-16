@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../services/api.js';
+import AddStatusModal from '../components/AddStatusModal.jsx';
+import StatusViewerModal from '../components/StatusViewerModal.jsx';
 
 const hostname = window.location.hostname;
 const defaultSocketUrl = hostname.includes('vercel.app')
@@ -269,6 +271,12 @@ export default function ChatPage() {
   // Quote replies
   const [replyingToMessage, setReplyingToMessage] = useState(null);
 
+  // WhatsApp Status / Stories State
+  const [statusGroups, setStatusGroups] = useState([]);
+  const [isAddStatusOpen, setIsAddStatusOpen] = useState(false);
+  const [isStatusViewerOpen, setIsStatusViewerOpen] = useState(false);
+  const [activeViewerUserIdx, setActiveViewerUserIdx] = useState(0);
+
   // Dark/Light theme state
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem('theme') !== 'light');
 
@@ -381,6 +389,11 @@ export default function ChatPage() {
         setConversations(conversationData);
         await refreshContacts();
 
+        try {
+          const { data: statusData } = await api.get('/api/status');
+          setStatusGroups(statusData || []);
+        } catch (_err) {}
+
         if (conversationData.length > 0) {
           setActiveConversationId(conversationData[0].id);
         }
@@ -431,6 +444,21 @@ export default function ChatPage() {
     socket.on('presence_update', (payload) => {
       setOnlineUsers(payload.onlineUserIds || []);
       void refreshContacts();
+    });
+
+    const refreshStatusUpdates = async () => {
+      try {
+        const { data } = await api.get('/api/status');
+        setStatusGroups(data || []);
+      } catch (_e) {}
+    };
+
+    socket.on('status_updated', () => {
+      void refreshStatusUpdates();
+    });
+
+    socket.on('status_viewed', () => {
+      void refreshStatusUpdates();
     });
 
     socket.on('new_message', (message) => {
@@ -495,6 +523,43 @@ export default function ChatPage() {
       socket.disconnect();
     };
   }, [user]);
+
+  const fetchStatuses = async () => {
+    try {
+      const { data } = await api.get('/api/status');
+      setStatusGroups(data || []);
+    } catch (_err) {}
+  };
+
+  const handleReplyToStatus = async (targetUserId, replyText) => {
+    try {
+      let targetConv = conversations.find((c) => !c.isGroup && c.participants?.some((p) => p.id === targetUserId));
+      let convId = targetConv?.id;
+
+      if (!convId) {
+        const { data: newConv } = await api.post('/api/conversations', { participantId: targetUserId });
+        convId = newConv.id;
+        setConversations((prev) => [newConv, ...prev.filter((c) => c.id !== newConv.id)]);
+      }
+
+      setActiveConversationId(convId);
+
+      const payload = {
+        conversationId: convId,
+        recipientId: targetUserId,
+        text: replyText,
+        fileUrl: null,
+        fileName: null,
+        fileType: null,
+        fileSize: null,
+        replyToMessageId: null,
+      };
+
+      socketRef.current?.emit('send_message', payload);
+    } catch (err) {
+      console.error('Failed to reply to status:', err);
+    }
+  };
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -1062,6 +1127,111 @@ export default function ChatPage() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* WhatsApp Status Updates Section */}
+              <div className="mb-4 pb-3 border-b border-white/5">
+                <div className="flex items-center justify-between px-1 mb-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Status Updates
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddStatusOpen(true)}
+                    className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20"
+                  >
+                    + Add Status
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 overflow-x-auto pb-1.5 px-0.5 scrollbar-none">
+                  {/* My Status Button */}
+                  {(() => {
+                    const myGroupIdx = statusGroups.findIndex((g) => g.userId === user?.id);
+                    const myGroup = myGroupIdx !== -1 ? statusGroups[myGroupIdx] : null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (myGroup && myGroup.statuses.length > 0) {
+                            setActiveViewerUserIdx(myGroupIdx);
+                            setIsStatusViewerOpen(true);
+                          } else {
+                            setIsAddStatusOpen(true);
+                          }
+                        }}
+                        className="flex flex-col items-center gap-1 shrink-0 group focus:outline-none"
+                        title={myGroup ? 'View My Status' : 'Add Status'}
+                      >
+                        <div className="relative">
+                          <div className={`p-0.5 rounded-full ${myGroup ? 'bg-gradient-to-tr from-emerald-400 to-cyan-400 p-[2px]' : ''}`}>
+                            {user?.avatarUrl ? (
+                              <img src={user.avatarUrl} alt={user.name} className="h-10 w-10 rounded-full object-cover border-2 border-slate-900" />
+                            ) : (
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800 text-emerald-400 font-bold text-xs border-2 border-slate-900">
+                                {(user?.name?.slice(0, 1) || 'U').toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsAddStatusOpen(true);
+                            }}
+                            className="absolute bottom-0 right-0 h-4 w-4 rounded-full bg-emerald-500 text-slate-950 font-bold text-[10px] flex items-center justify-center ring-2 ring-slate-950 hover:bg-emerald-400 transition"
+                            title="Add Status"
+                          >
+                            +
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-semibold text-slate-300 truncate max-w-[64px]">
+                          My Status
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Contacts Statuses */}
+                  {statusGroups
+                    .filter((g) => g.userId !== user?.id)
+                    .map((group) => {
+                      const groupGlobalIdx = statusGroups.findIndex((g) => g.userId === group.userId);
+                      return (
+                        <button
+                          key={group.userId}
+                          type="button"
+                          onClick={() => {
+                            setActiveViewerUserIdx(groupGlobalIdx);
+                            setIsStatusViewerOpen(true);
+                          }}
+                          className="flex flex-col items-center gap-1 shrink-0 group focus:outline-none"
+                          title={`View ${group.userName}'s Status`}
+                        >
+                          <div className="relative">
+                            <div
+                              className={`p-[2px] rounded-full transition ${
+                                group.hasUnviewed
+                                  ? 'bg-gradient-to-tr from-emerald-400 via-cyan-400 to-emerald-400 animate-pulse'
+                                  : 'bg-slate-700'
+                              }`}
+                            >
+                              {group.userAvatar ? (
+                                <img src={group.userAvatar} alt={group.userName} className="h-10 w-10 rounded-full object-cover border-2 border-slate-900" />
+                              ) : (
+                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800 text-cyan-300 font-bold text-xs border-2 border-slate-900">
+                                  {(group.userName?.slice(0, 1) || 'U').toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-medium text-slate-300 truncate max-w-[64px] group-hover:text-emerald-400 transition">
+                            {group.userName.split(' ')[0]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
 
               <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">Chats</p>
@@ -1676,6 +1846,23 @@ export default function ChatPage() {
             />
           </div>
         )}
+
+        {/* WhatsApp Status Modals */}
+        <AddStatusModal
+          isOpen={isAddStatusOpen}
+          onClose={() => setIsAddStatusOpen(false)}
+          onStatusPosted={fetchStatuses}
+        />
+
+        <StatusViewerModal
+          isOpen={isStatusViewerOpen}
+          statusGroups={statusGroups}
+          initialUserIndex={activeViewerUserIdx}
+          currentUser={user}
+          onClose={() => setIsStatusViewerOpen(false)}
+          onReplyToStatus={handleReplyToStatus}
+          onStatusDeleted={fetchStatuses}
+        />
 
       </div>
     </div>
