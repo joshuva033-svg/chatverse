@@ -31,8 +31,6 @@ router.post('/register', async (req, res) => {
     passwordHash: bcrypt.hashSync(password, 10),
     avatar: name.trim().slice(0, 1).toUpperCase(),
     avatarUrl: null,
-    isOnline: false,
-    lastSeenAt: null,
   });
 
   const token = generateToken(user);

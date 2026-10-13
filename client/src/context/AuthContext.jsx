@@ -43,11 +43,6 @@ export function AuthProvider({ children }) {
     const cleanEmail = (email || '').toString().trim().toLowerCase();
     const cleanPassword = (password || '').toString().trim();
     const { data } = await api.post('/api/auth/register', { name: cleanName, email: cleanEmail, password: cleanPassword });
-    if (data.token && data.user) {
-      localStorage.setItem('token', data.token);
-      setToken(data.token);
-      setUser(data.user);
-    }
     return data;
   };
 

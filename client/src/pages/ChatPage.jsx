@@ -425,11 +425,27 @@ export default function ChatPage() {
     socket.on('connect', () => {
       setSocketConnected(true);
       setErrorMessage('');
-      socket.emit('authenticate', { token: localStorage.getItem('token') });
+
+      const token = localStorage.getItem('token');
+      if (token) {
+        console.log('[ChatPage] Socket connected, sending authentication token');
+        socket.emit('authenticate', { token });
+      } else {
+        console.warn('[ChatPage] Socket connected but no token found in localStorage');
+      }
+
       if (activeConversationIdRef.current) {
         socket.emit('join_conversation', activeConversationIdRef.current);
       }
       void refreshContacts();
+    });
+
+    // Socket.io fires 'reconnect' after the transport reconnects; re-authenticate
+    socket.on('reconnect', () => {
+      socket.emit('authenticate', { token: localStorage.getItem('token') });
+      if (activeConversationIdRef.current) {
+        socket.emit('join_conversation', activeConversationIdRef.current);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -441,9 +457,13 @@ export default function ChatPage() {
       setErrorMessage('Unable to connect to the chat server.');
     });
 
+    // presence_update: only update the online IDs list – do NOT also refreshContacts()
+    // because contacts (the user list) don't change when someone comes online/offline.
+    // The previous refreshContacts() here caused a race condition on slow networks
+    // where the old contacts list temporarily replaced the new one before the
+    // presence_update state was applied, making the online dots disappear.
     socket.on('presence_update', (payload) => {
       setOnlineUsers(payload.onlineUserIds || []);
-      void refreshContacts();
     });
 
     const refreshStatusUpdates = async () => {
@@ -1141,7 +1161,7 @@ export default function ChatPage() {
                     onClick={() => setIsAddStatusOpen(true)}
                     className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20"
                   >
-                    + Add Status
+                    + Create Status
                   </button>
                 </div>
 
@@ -1264,11 +1284,10 @@ export default function ChatPage() {
                 }
 
                 return (
-                  <button
+                  <div
                     key={conversation.id}
-                    type="button"
                     onClick={() => handleSelectConversation(conversation)}
-                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition duration-300 relative group/item ${
+                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left transition duration-300 relative group/item cursor-pointer ${
                       isActive ? activeConversationClass : hoverUnactiveClass
                     }`}
                   >
@@ -1326,7 +1345,7 @@ export default function ChatPage() {
                         </button>
                       )}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

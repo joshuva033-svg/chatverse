@@ -105,7 +105,7 @@ export default function AddStatusModal({ isOpen, onClose, onStatusPosted }) {
         <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
           <div className="flex items-center gap-2">
             <span className="flex h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
-            <h3 className="text-lg font-bold text-emerald-400">Create WhatsApp Status</h3>
+            <h3 className="text-lg font-bold text-emerald-400">Create Status</h3>
           </div>
           <button
             onClick={onClose}

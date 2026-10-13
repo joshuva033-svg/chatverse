@@ -32,6 +32,8 @@ const allowedOrigins = new Set([
   'http://127.0.0.1:5174',
   'http://192.168.31.15:5173',
   'http://192.168.31.15:5174',
+  // Accept any Vercel preview/production domain for this project
+  'https://chatverse-w6fc.onrender.com',
 ].filter(Boolean));
 
 const localNetworkOriginPattern = /^https?:\/\/(?:localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):\d+$/;
@@ -97,6 +99,7 @@ function serializeUser(user) {
     avatarUrl: user.avatarUrl || null,
     status: user.status || 'Hey there! I am using Chat-Verse.',
     readReceipts: user.readReceipts !== false,
+    isOnline: Boolean(user.isOnline),
   };
 }
 
@@ -169,8 +172,10 @@ app.post('/api/auth/register', async (req, res) => {
     avatar: (cleanName || 'U').charAt(0).toUpperCase(),
   });
 
-  const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '365d' });
-  res.json({ user: serializeUser(user), token });
+  res.status(201).json({
+    message: 'User registered successfully. Please log in.',
+    user: serializeUser(user)
+  });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -392,15 +397,31 @@ io.on('connection', (socket) => {
       const user = await User.findOne({ id: payload.id });
 
       if (!user) {
+        socket.emit('auth_error', { message: 'User not found.' });
         return;
+      }
+
+      // If this socket was already authenticated (reconnect), clean up first
+      if (socket.userId && socket.userId !== user.id) {
+        socketUsers.delete(socket.id);
       }
 
       socket.userId = user.id;
       socketUsers.set(socket.id, user.id);
       socket.join(user.id);
-      io.emit('presence_update', { onlineUserIds: [...new Set([...socketUsers.values()])] });
+
+      const onlineUserIds = [...new Set([...socketUsers.values()])];
+      console.log('[Socket] User authenticated:', user.id, '| Online count:', onlineUserIds.length);
+
+      // Broadcast the updated online list to ALL connected clients
+      io.emit('presence_update', { onlineUserIds });
+
+      // Also send the current online list back to this specific socket
+      // so the client gets it even if it missed the broadcast
+      socket.emit('presence_update', { onlineUserIds });
     } catch (error) {
-      console.error('Socket auth failed', error);
+      console.error('Socket auth failed:', error.message);
+      socket.emit('auth_error', { message: 'Authentication failed.' });
     }
   });
 
@@ -513,10 +534,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
-    if (socket.userId) {
-      socketUsers.delete(socket.id);
-      io.emit('presence_update', { onlineUserIds: [...new Set([...socketUsers.values()])] });
+  socket.on('disconnect', (reason) => {
+    const wasUserId = socket.userId;
+    socketUsers.delete(socket.id);
+    if (wasUserId) {
+      const onlineUserIds = [...new Set([...socketUsers.values()])];
+      console.log('[Socket] User disconnected:', wasUserId, '| Reason:', reason, '| Online count:', onlineUserIds.length);
+      io.emit('presence_update', { onlineUserIds });
     }
   });
 });

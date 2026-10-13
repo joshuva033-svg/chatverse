@@ -29,7 +29,11 @@ export default function AuthPage() {
     try {
       if (mode === 'register') {
         await register(name, email, password);
-        navigate('/');
+        setSuccess('Account created successfully! Please sign in.');
+        setMode('login');
+        setName('');
+        setEmail('');
+        setPassword('');
       } else {
         await login(email, password);
         navigate('/');
