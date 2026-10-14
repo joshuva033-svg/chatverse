@@ -93,8 +93,8 @@ function VoiceNotePlayer({ src, fileSize }) {
         audioRef.current.currentTime = 0;
       }
 
-      // Force load the audio source to ensure metadata is fresh and buffering is triggered
-      audioRef.current.load();
+
+
 
       const playPromise = audioRef.current.play();
       if (playPromise !== undefined) {
@@ -260,7 +260,26 @@ export default function ChatPage() {
   const [messageMenu, setMessageMenu] = useState(null); // { messageId, x, y }
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [sharedMedia, setSharedMedia] = useState([]);
+  const [sharedMediaFilter, setSharedMediaFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+
+  const handleSearchMessages = async (query) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    try {
+      const { data } = await api.get(`/api/conversations/${activeConversationId}/messages`, {
+        params: { search: query },
+      });
+      setSearchResults(data);
+    } catch (err) {
+      console.error('Search failed:', err);
+    }
+  };
   const [chatTheme, setChatTheme] = useState('default');
 
   // Group creation modal state
@@ -646,6 +665,17 @@ export default function ChatPage() {
 
   const handleMessageAction = async (action, messageId) => {
     try {
+      if (action === 'copy') {
+        const msg = messages.find(m => m.id === messageId);
+        if (msg?.text) {
+          handleCopyMessage(msg.text);
+        } else if (msg?.fileUrl) {
+          handleCopyMessage(msg.fileUrl);
+        }
+        setMessageMenu(null);
+        return;
+      }
+
       let res;
       if (action === 'delete-me') {
         res = await api.post(`/api/messages/${messageId}/delete-me`);
@@ -1489,8 +1519,10 @@ export default function ChatPage() {
                       </div>
                     </div>
                   ) : (
-                    messages.map((message) => {
-                      const isMine = message.senderId === user?.id;
+                    {messages
+                      .filter(m => !m.deletedFor?.includes(user?.id))
+                      .map((message) => {
+                        const isMine = message.senderId === user?.id;
                       const isImage = message.fileType?.startsWith('image/');
                       const sender = activeConversation.participants.find((p) => p.id === message.senderId);
 
@@ -1972,13 +2004,13 @@ export default function ChatPage() {
               </button>
               <button
                 type="button"
-                onClick={() => handleMessageAction('star', messageMenu.messageId)}
+                onClick={() => handleMessageAction(message.isStarred ? 'unstar' : 'star', messageMenu.messageId)}
                 className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-400 rounded-xl transition"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.966 0 1.371 1.332-.588 1.805l-6.19 3.724a1 1 0 00-.784 1.s-1.286 1.286-1.286 1.286s1.286 1.286 1.286 1.286a1 1 0 00.784-1l6.19-3.724c1.961-1.181 2.528-2. laL18.5 8.278a1 1 0 00-.ist-1. laL14.5 4. la L12 2.927" />
                 </svg>
-                Star message
+                {message.isStarred ? 'Unstar message' : 'Star message'}
               </button>
               <div className="h-px bg-white/5 my-1" />
               <button
@@ -1991,16 +2023,18 @@ export default function ChatPage() {
                 </svg>
                 Delete for me
               </button>
-              <button
-                type="button"
-                onClick={() => handleMessageAction('delete-everyone', messageMenu.messageId)}
-                className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-rose-500 hover:bg-rose-500/20 hover:text-rose-600 rounded-xl transition"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.998-1.858L5 13m5-10v10m4-10v10" />
-                </svg>
-                Delete for everyone
-              </button>
+              {message.senderId === user?.id && (
+                <button
+                  type="button"
+                  onClick={() => handleMessageAction('delete-everyone', messageMenu.messageId)}
+                  className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-rose-500 hover:bg-rose-500/20 hover:text-rose-600 rounded-xl transition"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.998-1.858L5 13m5-10v10m4-10v10" />
+                  </svg>
+                  Delete for everyone
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -2049,7 +2083,7 @@ export default function ChatPage() {
                     <input
                       type="text"
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => handleSearchMessages(e.target.value)}
                       className={`w-full rounded-2xl border px-4 py-2 text-sm outline-none transition ${darkTheme ? 'bg-slate-800 border-white/10 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}
                       placeholder="Search in this conversation..."
                     />
@@ -2057,33 +2091,81 @@ export default function ChatPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
+                  {searchResults.length > 0 && (
+                    <div className="max-h-40 overflow-y-auto space-y-2 border-t border-white/5 pt-2">
+                      {searchResults.map((msg) => (
+                        <div
+                          key={msg.id}
+                          onClick={() => {
+                            setIsInfoOpen(false);
+                            document.getElementById(`msg-${msg.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }}
+                          className="p-2 text-xs rounded-lg hover:bg-cyan-500/10 cursor-pointer transition flex flex-col"
+                        >
+                          <span className="font-bold text-cyan-400">{msg.senderId === user?.id ? 'You' : 'Other'}</span>
+                          <p className="truncate text-slate-300">{msg.text || '📎 Attachment'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Shared Media */}
                 <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Shared Media & Files</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {sharedMedia.length === 0 ? (
-                      <p className="col-span-3 text-xs text-slate-400 italic text-center py-4">No shared media found.</p>
-                    ) : (
-                      sharedMedia.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className="aspect-square rounded-lg overflow-hidden border border-white/5 bg-slate-800 group relative cursor-pointer"
-                          onClick={() => {
-                            if (msg.fileUrl) setLightboxImageUrl(msg.fileUrl);
-                          }}
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Shared Content</p>
+                    <div className="flex gap-2">
+                      {['all', 'media', 'links', 'docs'].map((filter) => (
+                        <button
+                          key={filter}
+                          onClick={() => setSharedMediaFilter(filter)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full transition ${
+                            sharedMediaFilter === filter ? 'bg-cyan-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                          }`}
                         >
-                          {msg.fileUrl && msg.fileType?.startsWith('image/') ? (
-                            <img src={msg.fileUrl} alt="" className="h-full w-full object-cover group-hover:scale-110 transition" />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center text-[10px] text-slate-400 p-1 text-center">
-                              {msg.fileType?.includes('audio') ? '🎵 Audio' : msg.fileUrl ? '📄 File' : '🔗 Link'}
+                          {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {sharedMedia
+                      .filter((msg) => {
+                        if (sharedMediaFilter === 'all') return true;
+                        if (sharedMediaFilter === 'media') return msg.fileType?.startsWith('image/') || msg.fileType?.startsWith('video/');
+                        if (sharedMediaFilter === 'links') return msg.fileUrl?.startsWith('http') && !msg.fileType;
+                        if (sharedMediaFilter === 'docs') return msg.fileUrl && !msg.fileType?.startsWith('image/') && !msg.fileType?.startsWith('video/');
+                        return true;
+                      })
+                      .length === 0 ? (
+                        <p className="col-span-3 text-xs text-slate-400 italic text-center py-4">No {sharedMediaFilter} found.</p>
+                      ) : (
+                        sharedMedia
+                          .filter((msg) => {
+                            if (sharedMediaFilter === 'all') return true;
+                            if (sharedMediaFilter === 'media') return msg.fileType?.startsWith('image/') || msg.fileType?.startsWith('video/');
+                            if (sharedMediaFilter === 'links') return msg.fileUrl?.startsWith('http') && !msg.fileType;
+                            if (sharedMediaFilter === 'docs') return msg.fileUrl && !msg.fileType?.startsWith('image/') && !msg.fileType?.startsWith('video/');
+                            return true;
+                          })
+                          .map((msg) => (
+                            <div
+                              key={msg.id}
+                              className="aspect-square rounded-lg overflow-hidden border border-white/5 bg-slate-800 group relative cursor-pointer"
+                              onClick={() => {
+                                if (msg.fileUrl) setLightboxImageUrl(msg.fileUrl);
+                              }}
+                            >
+                              {msg.fileUrl && msg.fileType?.startsWith('image/') ? (
+                                <img src={msg.fileUrl} alt="" className="h-full w-full object-cover group-hover:scale-110 transition" />
+                              ) : (
+                                <div className="h-full w-full flex items-center justify-center text-[10px] text-slate-400 p-1 text-center">
+                                  {msg.fileType?.includes('audio') ? '🎵 Audio' : msg.fileUrl ? '📄 File' : '🔗 Link'}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      ))
-                    )}
+                          ))
+                      )}
                   </div>
                 </div>
 

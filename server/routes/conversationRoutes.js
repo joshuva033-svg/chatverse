@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import StarredMessage from '../models/StarredMessage.js';
 import { requireAuth } from '../middleware/auth.js';
 import { serializeConversation, serializeMessage } from '../utils/serializers.js';
 
@@ -97,7 +98,18 @@ router.get('/:conversationId/messages', requireAuth, async (req, res) => {
   }
 
   const messages = await Message.find(query).sort({ createdAt: 1 }).lean();
-  res.json(messages.map(serializeMessage));
+
+  // Fetch starred messages for the current user to mark them in the response
+  const starred = await StarredMessage.find({ userId: req.user.id }).lean();
+  const starredIds = new Set(starred.map(s => s.messageId));
+
+  res.json(messages.map(msg => {
+    const serialized = serializeMessage(msg);
+    return {
+      ...serialized,
+      isStarred: starredIds.has(msg.id),
+    };
+  }));
 });
 
 export default router;

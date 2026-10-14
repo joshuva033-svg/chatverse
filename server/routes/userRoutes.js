@@ -30,7 +30,7 @@ router.get('/:userId/profile', requireAuth, async (req, res) => {
 });
 
 router.put('/me/profile', requireAuth, async (req, res) => {
-  const { name, avatar, avatarUrl } = req.body;
+  const { name, avatar, avatarUrl, bio } = req.body;
   const user = await User.findOne({ id: req.user.id });
 
   if (!user) {
@@ -47,6 +47,10 @@ router.put('/me/profile', requireAuth, async (req, res) => {
 
   if (avatarUrl) {
     user.avatarUrl = avatarUrl;
+  }
+
+  if (bio !== undefined) {
+    user.bio = bio?.trim() || '';
   }
 
   await user.save();
