@@ -8,6 +8,7 @@ const conversationSchema = new mongoose.Schema(
     isGroup: { type: Boolean, default: false },
     name: { type: String, default: '' },
     createdBy: { type: String, default: '' },
+    theme: { type: String, default: 'default' },
     updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true },

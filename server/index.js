@@ -14,6 +14,7 @@ import Message from './models/Message.js';
 import path from 'node:path';
 import uploadRoutes from './routes/uploadRoutes.js';
 import statusRoutes from './routes/statusRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
 
 dotenv.config();
 
@@ -65,11 +66,14 @@ app.use(
       if (filePath.endsWith('.mp3')) res.setHeader('Content-Type', 'audio/mpeg');
       if (filePath.endsWith('.ogg')) res.setHeader('Content-Type', 'audio/ogg');
       if (filePath.endsWith('.wav')) res.setHeader('Content-Type', 'audio/wav');
+      // Fallback for audio files that might not have these extensions but are audio
+      if (filePath.includes('voice-note')) res.setHeader('Content-Type', 'audio/webm');
     },
   }),
 );
 app.use('/api/upload', uploadRoutes);
 app.use('/api/status', authMiddleware, statusRoutes);
+app.use('/api/messages', authMiddleware, messageRoutes);
 
 const socketUsers = new Map();
 
@@ -241,7 +245,7 @@ app.get('/api/users/:userId/profile', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/users/me/profile', authMiddleware, async (req, res) => {
-  const { name, avatar, readReceipts, status, avatarUrl } = req.body;
+  const { name, avatar, readReceipts, status, avatarUrl, bio } = req.body;
   const user = await User.findOne({ id: req.user.id });
 
   if (!user) {
@@ -266,6 +270,10 @@ app.put('/api/users/me/profile', authMiddleware, async (req, res) => {
 
   if (avatarUrl !== undefined) {
     user.avatarUrl = avatarUrl;
+  }
+
+  if (bio !== undefined) {
+    user.bio = bio;
   }
 
   await user.save();
@@ -381,8 +389,39 @@ app.get('/api/conversations/:conversationId/messages', authMiddleware, async (re
     return res.status(403).json({ message: 'You are not part of this conversation.' });
   }
 
-  const messages = await Message.find({ conversationId: conversation.id }).sort({ createdAt: 1 });
+  const messages = await Message.find({
+    conversationId: conversation.id,
+    deletedFor: { $ne: req.user.id }
+  }).sort({ createdAt: 1 });
+
   res.json(messages.map((message) => serializeMessage(message)));
+});
+
+app.put('/api/conversations/:conversationId/theme', authMiddleware, async (req, res) => {
+  const { theme } = req.body;
+  const { conversationId } = req.params;
+
+  const conversation = await Conversation.findOne({ id: conversationId });
+  if (!conversation) return res.status(404).json({ message: 'Conversation not found.' });
+
+  if (!conversation.participants.includes(req.user.id)) {
+    return res.status(403).json({ message: 'Unauthorized' });
+  }
+
+  conversation.theme = theme || 'default';
+  await conversation.save();
+
+  res.json({ message: 'Theme updated successfully', theme: conversation.theme });
+});
+
+app.get('/api/conversations/:conversationId/shared', authMiddleware, async (req, res) => {
+  const { conversationId } = req.params;
+  const messages = await Message.find({
+    conversationId,
+    $or: [{ fileUrl: { $ne: null } }, { text: { $regex: /http/i } }]
+  }).sort({ createdAt: -1 });
+
+  res.json(messages.map((m) => serializeMessage(m)));
 });
 
 const server = http.createServer(app);

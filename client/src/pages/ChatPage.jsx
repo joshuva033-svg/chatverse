@@ -91,6 +91,10 @@ function VoiceNotePlayer({ src, fileSize }) {
       if (audioRef.current.ended || (audioRef.current.duration && audioRef.current.currentTime >= audioRef.current.duration)) {
         audioRef.current.currentTime = 0;
       }
+
+      // Force load the audio source to ensure metadata is fresh and buffering is triggered
+      audioRef.current.load();
+
       const playPromise = audioRef.current.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
@@ -211,7 +215,8 @@ function VoiceNotePlayer({ src, fileSize }) {
       <audio
         ref={audioRef}
         src={cleanSrc}
-        preload="metadata"
+        preload="auto"
+        crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onDurationChange={handleDurationChange}
@@ -251,6 +256,11 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [messageMenu, setMessageMenu] = useState(null); // { messageId, x, y }
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [sharedMedia, setSharedMedia] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [chatTheme, setChatTheme] = useState('default');
 
   // Group creation modal state
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -630,6 +640,51 @@ export default function ChatPage() {
       setErrorMessage('');
     } catch (_error) {
       setErrorMessage('Unable to open that conversation.');
+    }
+  };
+
+  const handleMessageAction = async (action, messageId) => {
+    try {
+      let res;
+      if (action === 'delete-me') {
+        res = await api.post(`/api/messages/${messageId}/delete-me`);
+      } else if (action === 'delete-everyone') {
+        res = await api.post(`/api/messages/${messageId}/delete-everyone`);
+      } else if (action === 'star') {
+        res = await api.post(`/api/messages/${messageId}/star`);
+      }
+
+      if (res) {
+        // Refresh messages to reflect deletion or starring
+        const { data } = await api.get(`/api/conversations/${activeConversationId}/messages`);
+        setMessages(data);
+      }
+      setMessageMenu(null);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Action failed.');
+    }
+  };
+
+  const handleCopyMessage = (text) => {
+    navigator.clipboard.writeText(text);
+    setMessageMenu(null);
+  };
+
+  const handleUpdateTheme = async (theme) => {
+    try {
+      await api.put(`/api/conversations/${activeConversationId}/theme`, { theme });
+      setChatTheme(theme);
+    } catch (err) {
+      setErrorMessage('Failed to update theme.');
+    }
+  };
+
+  const fetchSharedMedia = async () => {
+    try {
+      const { data } = await api.get(`/api/conversations/${activeConversationId}/shared`);
+      setSharedMedia(data);
+    } catch (err) {
+      console.error('Failed to fetch shared media');
     }
   };
 
@@ -1388,7 +1443,10 @@ export default function ChatPage() {
                         </svg>
                       </div>
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 cursor-pointer hover:opacity-80 transition" onClick={() => {
+                        setIsInfoOpen(true);
+                        fetchSharedMedia();
+                      }}>
                       <p className="text-base font-bold truncate">
                         {activeConversation.isGroup ? activeConversation.name : recipient?.name}
                       </p>
@@ -1416,6 +1474,10 @@ export default function ChatPage() {
 
                 {/* Messages Box */}
                 <div className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-4 transition ${
+                  chatTheme === 'emerald' ? 'bg-emerald-950/20' :
+                  chatTheme === 'rose' ? 'bg-rose-950/20' :
+                  chatTheme === 'violet' ? 'bg-violet-950/20' :
+                  chatTheme === 'amber' ? 'bg-amber-950/20' :
                   darkTheme ? 'bg-[radial-gradient(circle_at_bottom,_rgba(6,182,212,0.03),_transparent_55%)]' : 'bg-slate-100/20'
                 }`}>
                   {messages.length === 0 ? (
@@ -1461,11 +1523,17 @@ export default function ChatPage() {
                             )}
 
                             {/* Message Bubble wrapper with clean corner tail */}
-                            <div className={`relative px-4 py-3 shadow-xl transition-all duration-300 hover:shadow-cyan-950/5 ${
-                              isMine
-                                ? (darkTheme ? 'bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-3xl rounded-tr-none' : 'bg-gradient-to-r from-cyan-500 to-cyan-400 text-white rounded-3xl rounded-tr-none')
-                                : (darkTheme ? 'bg-slate-900/80 border border-white/5 text-slate-100 rounded-3xl rounded-tl-none' : 'bg-white border border-slate-200/80 text-slate-900 rounded-3xl rounded-tl-none')
-                            }`}>
+                            <div
+                              className={`relative px-4 py-3 shadow-xl transition-all duration-300 hover:shadow-cyan-950/5 ${
+                                isMine
+                                  ? (darkTheme ? 'bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-3xl rounded-tr-none' : 'bg-gradient-to-r from-cyan-500 to-cyan-400 text-white rounded-3xl rounded-tr-none')
+                                  : (darkTheme ? 'bg-slate-900/80 border border-white/5 text-slate-100 rounded-3xl rounded-tl-none' : 'bg-white border border-slate-200/80 text-slate-900 rounded-3xl rounded-tl-none')
+                              }`}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setMessageMenu({ messageId: message.id, x: e.clientX, y: e.clientY });
+                              }}
+                            >
                               
                               {/* Quoted Reply Panel inside the bubble */}
                               {quotedMessage && (
@@ -1876,14 +1944,171 @@ export default function ChatPage() {
         <StatusViewerModal
           isOpen={isStatusViewerOpen}
           statusGroups={statusGroups}
-          initialUserIndex={activeViewerUserIdx}
+          initialUserUserIdx={activeViewerUserIdx}
           currentUser={user}
           onClose={() => setIsStatusViewerOpen(false)}
           onReplyToStatus={handleReplyToStatus}
           onStatusDeleted={fetchStatuses}
         />
 
-      </div>
-    </div>
+        {/* Message Context Menu */}
+        {messageMenu && (
+          <div
+            className="fixed z-50 rounded-2xl border border-white/10 bg-slate-900/95 backdrop-blur-xl shadow-2xl animate-fade-in p-1"
+            style={{ top: messageMenu.y, left: messageMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col min-w-[160px]">
+              <button
+                type="button"
+                onClick={() => handleMessageAction('copy', messageMenu.messageId)}
+                className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-400 rounded-xl transition"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+                Copy text
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMessageAction('star', messageMenu.messageId)}
+                className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-400 rounded-xl transition"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.966 0 1.371 1.332-.588 1.805l-6.19 3.724a1 1 0 00-.784 1.s-1.286 1.286-1.286 1.286s1.286 1.286 1.286 1.286a1 1 0 00.784-1l6.19-3.724c1.961-1.181 2.528-2. laL18.5 8.278a1 1 0 00-.ist-1. laL14.5 4. la L12 2.927" />
+                </svg>
+                Star message
+              </button>
+              <div className="h-px bg-white/5 my-1" />
+              <button
+                type="button"
+                onClick={() => handleMessageAction('delete-me', messageMenu.messageId)}
+                className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-rose-300 hover:bg-rose-500/20 hover:text-rose-400 rounded-xl transition"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.998-1.858L5 13m5-10v10m4-10v10" />
+                </svg>
+                Delete for me
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMessageAction('delete-everyone', messageMenu.messageId)}
+                className="flex items-center gap-2 px-3 py-2 text-left text-xs font-medium text-rose-500 hover:bg-rose-500/20 hover:text-rose-600 rounded-xl transition"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.998-1.858L5 13m5-10v10m4-10v10" />
+                </svg>
+                Delete for everyone
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Chat Info Screen */}
+        {isInfoOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-md p-4 animate-fade-in">
+            <div className={`w-full max-w-lg rounded-3xl overflow-hidden border shadow-2xl animate-slide-up ${darkTheme ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200'}`}>
+              <div className={`p-6 flex items-center justify-between ${darkTheme ? 'bg-slate-950/50' : 'bg-slate-50'}`}>
+                <h3 className={`text-lg font-bold ${darkTheme ? 'text-white' : 'text-slate-900'}`}>Chat Info</h3>
+                <button
+                  type="button"
+                  onClick={() => setIsInfoOpen(false)}
+                  className="p-2 rounded-full hover:bg-white/10 transition"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className={`p-6 space-y-8 overflow-y-auto max-h-[80vh] ${darkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
+                {/* User Profile */}
+                <div className="flex flex-col items-center text-center space-y-4">
+                  <div className="relative">
+                    {recipient?.avatarUrl ? (
+                      <img src={recipient.avatarUrl} alt={recipient.name} className="h-24 w-24 rounded-full object-cover border-4 border-cyan-500/30 shadow-xl" />
+                    ) : (
+                      <div className="h-24 w-24 rounded-full bg-cyan-500/20 flex items-center justify-center text-3xl font-bold text-cyan-400 border-4 border-cyan-500/30">
+                        {recipient?.name?.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <span className={`absolute bottom-2 right-2 h-4 w-4 rounded-full ring-2 ${darkTheme ? 'ring-slate-900 bg-emerald-400' : 'ring-white bg-emerald-400'}`} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{recipient?.name}</p>
+                    <p className="text-sm text-slate-400">{recipient?.email}</p>
+                    <p className="mt-2 text-sm italic text-slate-400">"{recipient?.bio || 'No bio set yet.'}"</p>
+                  </div>
+                </div>
+
+                {/* Search in Chat */}
+                <div className="space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Search Messages</p>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className={`w-full rounded-2xl border px-4 py-2 text-sm outline-none transition ${darkTheme ? 'bg-slate-800 border-white/10 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'}`}
+                      placeholder="Search in this conversation..."
+                    />
+                    <svg className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* Shared Media */}
+                <div className="space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Shared Media & Files</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {sharedMedia.length === 0 ? (
+                      <p className="col-span-3 text-xs text-slate-400 italic text-center py-4">No shared media found.</p>
+                    ) : (
+                      sharedMedia.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className="aspect-square rounded-lg overflow-hidden border border-white/5 bg-slate-800 group relative cursor-pointer"
+                          onClick={() => {
+                            if (msg.fileUrl) setLightboxImageUrl(msg.fileUrl);
+                          }}
+                        >
+                          {msg.fileUrl && msg.fileType?.startsWith('image/') ? (
+                            <img src={msg.fileUrl} alt="" className="h-full w-full object-cover group-hover:scale-110 transition" />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center text-[10px] text-slate-400 p-1 text-center">
+                              {msg.fileType?.includes('audio') ? '🎵 Audio' : msg.fileUrl ? '📄 File' : '🔗 Link'}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Chat Theme */}
+                <div className="space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Chat Theme</p>
+                  <div className="flex gap-3">
+                    {['default', 'emerald', 'rose', 'violet', 'amber'].map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => handleUpdateTheme(t)}
+                        className={`h-8 w-8 rounded-full border-2 transition ${chatTheme === t ? 'border-cyan-400 scale-125' : 'border-transparent'} ${
+                          t === 'default' ? 'bg-slate-700' :
+                          t === 'emerald' ? 'bg-emerald-500' :
+                          t === 'rose' ? 'bg-rose-500' :
+                          t === 'violet' ? 'bg-violet-500' :
+                          'bg-amber-500'
+                        }`}
+                        title={`Set theme to ${t}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
   );
 }

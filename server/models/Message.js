@@ -12,6 +12,7 @@ const messageSchema = new mongoose.Schema(
     fileSize: { type: Number, default: null },
     replyToMessageId: { type: String, default: null },
     readAt: { type: Date, default: null },
+    deletedFor: [{ type: String }],
   },
   { timestamps: true },
 );

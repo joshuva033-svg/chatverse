@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema(
     avatar: { type: String, default: '' },
     avatarUrl: { type: String, default: null },
     status: { type: String, default: 'Hey there! I am using Chat-Verse.' },
+    bio: { type: String, default: '' },
     readReceipts: { type: Boolean, default: true },
   },
   { timestamps: true },
